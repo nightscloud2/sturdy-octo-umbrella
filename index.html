@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Minimal 3D WebGL Game Boilerplate</title>
+    <style>
+        /* Ensure the canvas fills the entire screen beautifully without scrollbars */
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #111; 
+        }
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Three.js Library via CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    
+    <!-- Our Game Logic -->
+    <script src="game.js"></script>
+
+</body>
+</html>
