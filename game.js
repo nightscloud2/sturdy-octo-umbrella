@@ -122,14 +122,20 @@ function startEngine() {
     scene.add(chunkMesh);
 
     // ==========================================
-    // 5. MOBILE CONTROLS (UI & Touch Listeners)
+    // 5. MOBILE CONTROLS & PHYSICS SETUP
     // ==========================================
     
-    // Inject a Walk Button into the screen
+    // Inject a Walk Button 
     const walkBtn = document.createElement('button');
     walkBtn.innerText = "WALK";
-    walkBtn.style.cssText = "position:absolute; bottom:40px; left:50%; transform:translateX(-50%); width:100px; height:100px; border-radius:50px; background:rgba(255,255,255,0.4); border:2px solid white; color:black; font-size:20px; font-weight:bold; touch-action:none; user-select:none; z-index:100;";
+    walkBtn.style.cssText = "position:absolute; bottom:40px; left:50%; transform:translateX(-50%); width:90px; height:90px; border-radius:45px; background:rgba(255,255,255,0.4); border:2px solid white; color:black; font-size:18px; font-weight:bold; touch-action:none; user-select:none; z-index:100;";
     document.body.appendChild(walkBtn);
+
+    // Inject a Jump Button
+    const jumpBtn = document.createElement('button');
+    jumpBtn.innerText = "JUMP";
+    jumpBtn.style.cssText = "position:absolute; bottom:40px; right:20px; width:80px; height:80px; border-radius:40px; background:rgba(255,255,255,0.4); border:2px solid white; color:black; font-size:16px; font-weight:bold; touch-action:none; user-select:none; z-index:100;";
+    document.body.appendChild(jumpBtn);
 
     let isWalking = false;
     walkBtn.addEventListener('touchstart', (e) => { e.preventDefault(); isWalking = true; }, {passive: false});
@@ -138,18 +144,18 @@ function startEngine() {
     // Touch-Drag to Look Around
     let isDragging = false;
     let previousTouch = null;
-    let yaw = 0;   // Left/Right rotation
-    let pitch = 0; // Up/Down rotation
+    let yaw = 0;   
+    let pitch = 0; 
 
     window.addEventListener('touchstart', (e) => {
-        if (e.target === walkBtn) return; // Ignore if touching the walk button
+        if (e.target === walkBtn || e.target === jumpBtn) return; 
         isDragging = true;
         previousTouch = e.touches[0];
     }, {passive: false});
 
     window.addEventListener('touchmove', (e) => {
-        if (!isDragging || e.target === walkBtn) return;
-        e.preventDefault(); // Stop screen from scrolling/pulling down
+        if (!isDragging || e.target === walkBtn || e.target === jumpBtn) return;
+        e.preventDefault(); 
         
         const touch = e.touches[0];
         const deltaX = touch.pageX - previousTouch.pageX;
@@ -157,8 +163,6 @@ function startEngine() {
 
         yaw -= deltaX * 0.005; 
         pitch -= deltaY * 0.005;
-        
-        // Clamp pitch so you can't break your neck looking too far up/down
         pitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, pitch)); 
 
         previousTouch = touch;
@@ -166,38 +170,83 @@ function startEngine() {
 
     window.addEventListener('touchend', () => { isDragging = false; });
 
-    // Handle screen rotation/resizing
     window.addEventListener('resize', () => {
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
         renderer.setSize(window.innerWidth, window.innerHeight);
     });
 
+    // --- PHYSICS VARIABLES ---
+    let yVelocity = 0;
+    const gravity = 0.015;
+    const playerHeight = 1.5; // How tall the player is in blocks
+    let isGrounded = false;
+
+    jumpBtn.addEventListener('touchstart', (e) => { 
+        e.preventDefault(); 
+        if (isGrounded) {
+            yVelocity = 0.25; // Upward force!
+            isGrounded = false;
+        }
+    }, {passive: false});
+
     // ==========================================
-    // 6. Game Loop
+    // 6. Game Loop with Collision
     // ==========================================
     function animate() {
         requestAnimationFrame(animate);
 
-        // Apply looking rotation
+        // 1. Apply look rotation
         camera.rotation.y = yaw;
         camera.rotation.x = pitch;
 
-        // Apply walking movement
+        // 2. Apply Gravity (Vertical Physics)
+        yVelocity -= gravity;
+        camera.position.y += yVelocity;
+
+        // Where are the player's feet?
+        const feetY = camera.position.y - playerHeight;
+        const currentBlockX = Math.floor(camera.position.x);
+        const currentBlockZ = Math.floor(camera.position.z);
+
+        // Floor Collision: Check the block right below our feet
+        if (getBlock(currentBlockX, Math.floor(feetY), currentBlockZ) !== 0) {
+            // We hit the ground! Snap to the top of the block.
+            camera.position.y = Math.floor(feetY) + 1 + playerHeight;
+            yVelocity = 0;
+            isGrounded = true;
+        } else {
+            isGrounded = false; // We are falling or jumping
+        }
+
+        // 3. Apply Walking (Horizontal Physics)
         if (isWalking) {
-            const speed = 0.1;
-            // Calculate which way is "forward" based on where you are looking
+            const speed = 0.12;
             const direction = new THREE.Vector3(0, 0, -1);
             direction.applyQuaternion(camera.quaternion);
-            
-            // Flatten the vector so you walk horizontally, not fly into the sky
             direction.y = 0; 
             direction.normalize(); 
             
-            camera.position.addScaledVector(direction, speed);
+            // Predict where we are trying to step
+            const nextX = camera.position.x + direction.x * speed;
+            const nextZ = camera.position.z + direction.z * speed;
+
+            // Check if there is a wall at our feet OR our head
+            const checkY_feet = Math.floor(camera.position.y - playerHeight + 0.1); 
+            const checkY_head = Math.floor(camera.position.y);
+            
+            const nextBlockX = Math.floor(nextX);
+            const nextBlockZ = Math.floor(nextZ);
+
+            // Only move if the block in front of us is Air (0)
+            if (getBlock(nextBlockX, checkY_feet, nextBlockZ) === 0 && 
+                getBlock(nextBlockX, checkY_head, nextBlockZ) === 0) {
+                camera.position.x = nextX;
+                camera.position.z = nextZ;
+            }
         }
 
         renderer.render(scene, camera);
     }
     animate();
-                         }
+    }
