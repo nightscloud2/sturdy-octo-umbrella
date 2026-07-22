@@ -28,77 +28,53 @@ function startEngine() {
     // ==========================================
     // 3. MULTI-CHUNK DATA STRUCTURE & NOISE
     // ==========================================
-    const chunkSize = 16;
-    const chunkHeight = 32; 
     
-    // A dictionary to store all our chunks by key string "chunkX,chunkZ"
-    const chunks = new Map();
-    const simplex = new SimplexNoise(); 
-
-    function getChunkKey(cx, cz) {
-        return `${cx},${cz}`;
-    }
-
-    // Generate a single chunk's block data using world-space noise
     function generateChunkData(cx, cz) {
         const blocks = new Uint8Array(chunkSize * chunkHeight * chunkSize);
         
         for (let x = 0; x < chunkSize; x++) {
             for (let z = 0; z < chunkSize; z++) {
-                // Calculate absolute world coordinates so hills span across chunks smoothly
                 const worldX = (cx * chunkSize) + x;
                 const worldZ = (cz * chunkSize) + z;
 
-                const scale = 0.05; // Slightly wider, smoother hills for a larger world
-                const rawNoise = simplex.noise2D(worldX * scale, worldZ * scale);
-                const surfaceHeight = Math.floor((rawNoise + 1) * 0.5 * 10) + 10; 
+                // 2D Surface Noise (The Blanket)
+                const surfaceScale = 0.05; 
+                const rawNoise2D = simplex.noise2D(worldX * surfaceScale, worldZ * surfaceScale);
+                const surfaceHeight = Math.floor((rawNoise2D + 1) * 0.5 * 10) + 10; 
 
                 for (let y = 0; y < chunkHeight; y++) {
                     const index = x + chunkSize * (y + chunkHeight * z);
+                    const worldY = y;
+                    
+                    // 1. Initial Surface Logic
+                    let blockID = 0;
                     if (y === surfaceHeight) {
-                        blocks[index] = 1; // Grass
+                        blockID = 1; // Grass
                     } else if (y < surfaceHeight) {
-                        blocks[index] = 2; // Dirt
-                    } else {
-                        blocks[index] = 0; // Air
+                        blockID = 2; // Dirt
                     }
+
+                    // 2. 3D Cave Carving (The Worms)
+                    if (blockID !== 0) { // Only carve blocks that exist below ground
+                        const caveScale = 0.08; // Frequency of the tunnels
+                        
+                        // Grab the 3D density at this exact block coordinate
+                        const caveDensity = simplex.noise3D(worldX * caveScale, worldY * caveScale, worldZ * caveScale);
+                        
+                        // If the density crosses zero (within a 0.1 margin), carve it out!
+                        if (Math.abs(caveDensity) < 0.1) {
+                            blockID = 0; // Turn back into air
+                        }
+                    }
+
+                    // 3. Bedrock Floor (Prevent falling out of the world)
+                    if (y === 0) blockID = 2; 
+
+                    blocks[index] = blockID;
                 }
             }
         }
         return blocks;
-    }
-
-    // Global block lookup that checks across ANY loaded chunk
-    function getBlock(worldX, worldY, worldZ) {
-        if (worldY < 0 || worldY >= chunkHeight) return 0;
-
-        const cx = Math.floor(worldX / chunkSize);
-        const cz = Math.floor(worldZ / chunkSize);
-        const chunkKey = getChunkKey(cx, cz);
-
-        if (!chunks.has(chunkKey)) return 0; // Out of bounds or unloaded
-
-        const chunkData = chunks.get(chunkKey).data;
-        const localX = worldX - (cx * chunkSize);
-        const localZ = worldZ - (cz * chunkSize);
-
-        return chunkData[localX + chunkSize * (worldY + chunkHeight * localZ)];
-    }
-
-    function setBlock(worldX, worldY, worldZ, blockID) {
-        if (worldY < 0 || worldY >= chunkHeight) return;
-
-        const cx = Math.floor(worldX / chunkSize);
-        const cz = Math.floor(worldZ / chunkSize);
-        const chunkKey = getChunkKey(cx, cz);
-
-        if (!chunks.has(chunkKey)) return;
-
-        const chunkData = chunks.get(chunkKey).data;
-        const localX = worldX - (cx * chunkSize);
-        const localZ = worldZ - (cz * chunkSize);
-
-        chunkData[localX + chunkSize * (worldY + chunkHeight * localZ)] = blockID;
     }
 
     // ==========================================
