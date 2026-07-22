@@ -13,7 +13,7 @@ function startEngine() {
 
     const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
     camera.rotation.order = 'YXZ'; 
-    // Start the camera nicely in the center of our expanded multi-chunk world
+    // Start the camera nicely in the center of our multi-chunk world
     camera.position.set(24, 25, 24); 
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -26,18 +26,30 @@ function startEngine() {
     scene.add(new THREE.AmbientLight(0x606060));
 
     // ==========================================
-    // 3. MULTI-CHUNK DATA STRUCTURE & NOISE
+    // 3. MULTI-CHUNK DATA STRUCTURE & CAVE NOISE
     // ==========================================
+    const chunkSize = 16;
+    const chunkHeight = 32; 
     
+    // Dictionary to store chunks by key string "cx,cz"
+    const chunks = new Map();
+    const simplex = new SimplexNoise(); 
+
+    function getChunkKey(cx, cz) {
+        return `${cx},${cz}`;
+    }
+
+    // Generate a single chunk's block data using 2D terrain + 3D cave noise
     function generateChunkData(cx, cz) {
         const blocks = new Uint8Array(chunkSize * chunkHeight * chunkSize);
         
         for (let x = 0; x < chunkSize; x++) {
             for (let z = 0; z < chunkSize; z++) {
+                // Absolute world space for smooth noise continuation across chunk lines
                 const worldX = (cx * chunkSize) + x;
                 const worldZ = (cz * chunkSize) + z;
 
-                // 2D Surface Noise (The Blanket)
+                // 2D Surface Noise (Rolling Hills)
                 const surfaceScale = 0.05; 
                 const rawNoise2D = simplex.noise2D(worldX * surfaceScale, worldZ * surfaceScale);
                 const surfaceHeight = Math.floor((rawNoise2D + 1) * 0.5 * 10) + 10; 
@@ -46,7 +58,6 @@ function startEngine() {
                     const index = x + chunkSize * (y + chunkHeight * z);
                     const worldY = y;
                     
-                    // 1. Initial Surface Logic
                     let blockID = 0;
                     if (y === surfaceHeight) {
                         blockID = 1; // Grass
@@ -54,20 +65,18 @@ function startEngine() {
                         blockID = 2; // Dirt
                     }
 
-                    // 2. 3D Cave Carving (The Worms)
-                    if (blockID !== 0) { // Only carve blocks that exist below ground
-                        const caveScale = 0.08; // Frequency of the tunnels
-                        
-                        // Grab the 3D density at this exact block coordinate
+                    // 3D Cave Carving (Worm caves)
+                    if (blockID !== 0) { 
+                        const caveScale = 0.08; // Cave tunnel frequency
                         const caveDensity = simplex.noise3D(worldX * caveScale, worldY * caveScale, worldZ * caveScale);
                         
-                        // If the density crosses zero (within a 0.1 margin), carve it out!
+                        // Carve out a tunnel if noise is close to zero
                         if (Math.abs(caveDensity) < 0.1) {
-                            blockID = 0; // Turn back into air
+                            blockID = 0; // Turn to air
                         }
                     }
 
-                    // 3. Bedrock Floor (Prevent falling out of the world)
+                    // Bedrock floor (prevents falling through the map bottom)
                     if (y === 0) blockID = 2; 
 
                     blocks[index] = blockID;
@@ -77,8 +86,41 @@ function startEngine() {
         return blocks;
     }
 
+    // Global block lookup that checks across loaded chunks
+    function getBlock(worldX, worldY, worldZ) {
+        if (worldY < 0 || worldY >= chunkHeight) return 0;
+
+        const cx = Math.floor(worldX / chunkSize);
+        const cz = Math.floor(worldZ / chunkSize);
+        const chunkKey = getChunkKey(cx, cz);
+
+        if (!chunks.has(chunkKey)) return 0; // Out of bounds / unloaded
+
+        const chunkData = chunks.get(chunkKey).data;
+        const localX = worldX - (cx * chunkSize);
+        const localZ = worldZ - (cz * chunkSize);
+
+        return chunkData[localX + chunkSize * (worldY + chunkHeight * localZ)];
+    }
+
+    function setBlock(worldX, worldY, worldZ, blockID) {
+        if (worldY < 0 || worldY >= chunkHeight) return;
+
+        const cx = Math.floor(worldX / chunkSize);
+        const cz = Math.floor(worldZ / chunkSize);
+        const chunkKey = getChunkKey(cx, cz);
+
+        if (!chunks.has(chunkKey)) return;
+
+        const chunkData = chunks.get(chunkKey).data;
+        const localX = worldX - (cx * chunkSize);
+        const localZ = worldZ - (cz * chunkSize);
+
+        chunkData[localX + chunkSize * (worldY + chunkHeight * localZ)] = blockID;
+    }
+
     // ==========================================
-    // 4. THE MESHER: Multi-Mesh Builder
+    // 4. THE MESHER: Chunk Mesh Builder
     // ==========================================
     const faceData = [
         { dir: [1, 0, 0], corners: [[1,0,1], [1,0,0], [1,1,0], [1,1,0], [1,1,1], [1,0,1]], norm: [1,0,0] },
@@ -94,7 +136,7 @@ function startEngine() {
         const chunk = chunks.get(chunkKey);
         if (!chunk) return;
 
-        // Remove old mesh from scene if it already exists
+        // Clean up existing mesh from scene
         if (chunk.mesh) {
             scene.remove(chunk.mesh);
             chunk.mesh.geometry.dispose();
@@ -118,7 +160,7 @@ function startEngine() {
                     const worldZ = startZ + z;
 
                     for (const face of faceData) {
-                        // Check neighbors globally (works even across chunk lines!)
+                        // Check neighbors globally across chunk boundaries
                         const neighbor = getBlock(worldX + face.dir[0], y + face.dir[1], worldZ + face.dir[2]);
                         
                         if (neighbor === 0) {
@@ -132,7 +174,7 @@ function startEngine() {
                                 r = 0.8; g = 0.6; b = 0.4;
                             }
 
-                            // Notch Shading
+                            // Directional Notch Shading
                             let shade = 1.0;
                             if (face.dir[1] === -1) shade = 0.5;      
                             else if (face.dir[0] !== 0) shade = 0.7;  
@@ -158,12 +200,11 @@ function startEngine() {
 
         const material = new THREE.MeshLambertMaterial({ vertexColors: true });
         chunk.mesh = new THREE.Mesh(geometry, material);
-        // Position the mesh correctly in the 3D world space
         chunk.mesh.position.set(startX, 0, startZ);
         scene.add(chunk.mesh);
     }
 
-    // Generate a 3x3 grid of chunks around the center (cx: -1 to 1, cz: -1 to 1)
+    // Generate 3x3 Grid of Chunks (-1 to 1 radius)
     const renderRadius = 1;
     for (let cx = -renderRadius; cx <= renderRadius; cx++) {
         for (let cz = -renderRadius; cz <= renderRadius; cz++) {
@@ -307,7 +348,7 @@ function startEngine() {
                     targetChunkZ = Math.floor(pz / chunkSize);
                 }
                 
-                // Rebuild only the affected chunk mesh!
+                // Rebuild modified chunk mesh
                 buildChunkMesh(targetChunkX, targetChunkZ);
             }
         }
@@ -383,4 +424,4 @@ function startEngine() {
         renderer.render(scene, camera);
     }
     animate();
-}
+            }
