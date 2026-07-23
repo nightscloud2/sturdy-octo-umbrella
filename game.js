@@ -3,7 +3,7 @@
 // ==========================================
 const CHUNK_SIZE = 16;
 const CHUNK_HEIGHT = 32;
-const RENDER_DISTANCE = 1; // 3x3 chunks
+const RENDER_DISTANCE = 1; // 3x3 chunks (9 total)
 
 const BLOCK_TYPES = {
     0: { name: 'Air', transparent: true },
@@ -24,13 +24,13 @@ const canvas = document.getElementById('webgl-canvas');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.setClearColor(0x87CEEB);
+renderer.setClearColor(0x87CEEB); // Sky blue
 
 const scene = new THREE.Scene();
 scene.fog = new THREE.FogExp2(0x87CEEB, 0.025);
 
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-camera.position.set(8, 20, 8);
+camera.position.set(8, 20, 8); // Spawn point above the terrain
 
 // Lighting
 const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
@@ -71,8 +71,7 @@ function generateChunkData(cx, cz) {
 
                 if (y <= height) {
                     if (y === height) {
-                        // Sand shoreline if low height, Grass otherwise
-                        block = (height < 9) ? 4 : 1;
+                        block = (height < 9) ? 4 : 1; // Sand shoreline or Grass
                     } else if (y > height - 3) {
                         block = (height < 9) ? 4 : 2; // Sand or Dirt
                     } else {
@@ -89,16 +88,14 @@ function generateChunkData(cx, cz) {
                 data[getIndex(x, y, z)] = block;
             }
 
-            // Tree Placement Logic (Grass surface only)
+            // Tree Placement Logic
             if (height >= 9 && Math.abs(simplex.noise2D(wx * 0.8, wz * 0.8)) > 0.75) {
-                // Trunk
                 const trunkHeight = 4;
                 for (let ty = 1; ty <= trunkHeight; ty++) {
                     if (height + ty < CHUNK_HEIGHT) {
                         data[getIndex(x, height + ty, z)] = 3; // Wood
                     }
                 }
-                // Leaves Canopy
                 for (let lx = -1; lx <= 1; lx++) {
                     for (let lz = -1; lz <= 1; lz++) {
                         for (let ly = trunkHeight; ly <= trunkHeight + 2; ly++) {
@@ -172,12 +169,12 @@ function buildChunkMesh(cx, cz) {
     const indices = [];
 
     const faces = [
-        { dir: [1, 0, 0], corners: [[1,0,0],[1,1,0],[1,1,1],[1,0,1]] }, // East
-        { dir: [-1, 0, 0], corners: [[0,0,1],[0,1,1],[0,1,0],[0,0,0]] }, // West
-        { dir: [0, 1, 0], corners: [[0,1,1],[1,1,1],[1,1,0],[0,1,0]] }, // Top
-        { dir: [0, -1, 0], corners: [[0,0,0],[1,0,0],[1,0,1],[0,0,1]] }, // Bottom
-        { dir: [0, 0, 1], corners: [[1,0,1],[1,1,1],[0,1,1],[0,0,1]] }, // North
-        { dir: [0, 0, -1], corners: [[0,0,0],[0,1,0],[1,1,0],[1,0,0]] }  // South
+        { dir: [1, 0, 0], corners: [[1,0,0],[1,1,0],[1,1,1],[1,0,1]] },
+        { dir: [-1, 0, 0], corners: [[0,0,1],[0,1,1],[0,1,0],[0,0,0]] },
+        { dir: [0, 1, 0], corners: [[0,1,1],[1,1,1],[1,1,0],[0,1,0]] },
+        { dir: [0, -1, 0], corners: [[0,0,0],[1,0,0],[1,0,1],[0,0,1]] },
+        { dir: [0, 0, 1], corners: [[1,0,1],[1,1,1],[0,1,1],[0,0,1]] },
+        { dir: [0, 0, -1], corners: [[0,0,0],[0,1,0],[1,1,0],[1,0,0]] }
     ];
 
     let vertexCount = 0;
@@ -190,7 +187,6 @@ function buildChunkMesh(cx, cz) {
 
                 const wx = cx * CHUNK_SIZE + x;
                 const wz = cz * CHUNK_SIZE + z;
-
                 const hexColor = BLOCK_TYPES[blockID].color || 0xFFFFFF;
                 const baseColor = new THREE.Color(hexColor);
 
@@ -201,7 +197,6 @@ function buildChunkMesh(cx, cz) {
 
                     const neighborID = getBlock(nx, ny, nz);
                     if (neighborID === 0 || BLOCK_TYPES[neighborID].transparent) {
-                        // Notch Shading per face orientation
                         const shade = face.dir[1] === 1 ? 1.0 : (face.dir[1] === -1 ? 0.5 : 0.8);
                         const c = baseColor.clone().multiplyScalar(shade);
 
@@ -254,6 +249,8 @@ const lookVector = { x: 0, y: 0 };
 function setupJoystick(baseId, knobId, outputVector) {
     const base = document.getElementById(baseId);
     const knob = document.getElementById(knobId);
+    if (!base || !knob) return; // Prevent crashes if HTML is missing
+
     let touchId = null;
 
     base.addEventListener('touchstart', (e) => {
@@ -314,7 +311,7 @@ function setupJoystick(baseId, knobId, outputVector) {
 setupJoystick('joy-left', 'knob-left', moveVector);
 setupJoystick('joy-right', 'knob-right', lookVector);
 
-// Action Button Handlers (Mirrored L/R)
+// Action Buttons
 document.querySelectorAll('.btn-mine').forEach(btn => {
     btn.addEventListener('touchstart', (e) => { e.preventDefault(); raycastAction('mine'); });
 });
@@ -323,14 +320,17 @@ document.querySelectorAll('.btn-place').forEach(btn => {
     btn.addEventListener('touchstart', (e) => { e.preventDefault(); raycastAction('place'); });
 });
 
-// Jump Button Handler
-document.getElementById('btn-jump').addEventListener('touchstart', (e) => {
-    e.preventDefault();
-    if (playerOnGround) {
-        playerVelocity.y = 0.18;
-        playerOnGround = false;
-    }
-});
+// Jump Button
+const jumpBtn = document.getElementById('btn-jump');
+if (jumpBtn) {
+    jumpBtn.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        if (playerOnGround) {
+            playerVelocity.y = 0.18;
+            playerOnGround = false;
+        }
+    });
+}
 
 // Hotbar Selector
 document.querySelectorAll('.block-option').forEach(opt => {
@@ -379,7 +379,7 @@ const playerVelocity = new THREE.Vector3();
 let playerOnGround = false;
 
 function updatePlayer() {
-    // Camera Rotation via Right Stick
+    // Camera Look
     yaw -= lookVector.x * 0.04;
     pitch -= lookVector.y * 0.04;
     pitch = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, pitch));
@@ -388,7 +388,7 @@ function updatePlayer() {
     camera.rotation.y = yaw;
     camera.rotation.x = pitch;
 
-    // Movement via Left Stick
+    // Movement 
     const forward = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw)).normalize();
     const side = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw)).normalize();
 
@@ -397,15 +397,16 @@ function updatePlayer() {
     moveDir.addScaledVector(forward, -moveVector.y * speed);
     moveDir.addScaledVector(side, moveVector.x * speed);
 
-    // Gravity & Ground Collision
+    // Gravity
     playerVelocity.y -= 0.009;
 
     camera.position.x += moveDir.x;
     camera.position.z += moveDir.z;
     camera.position.y += playerVelocity.y;
 
+    // Collision
     const px = Math.floor(camera.position.x);
-    const py = Math.floor(camera.position.y - 1.6);
+    const py = Math.floor(camera.position.y - 1.6); // 1.6 blocks tall
     const pz = Math.floor(camera.position.z);
 
     if (getBlock(px, py, pz) !== 0) {
