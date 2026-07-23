@@ -2,29 +2,55 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Minimal 3D WebGL Game Boilerplate</title>
-    <style>
-        /* Ensure the canvas fills the entire screen beautifully without scrollbars */
-        body {
-            margin: 0;
-            overflow: hidden;
-            background-color: #111; 
-        }
-        canvas {
-            display: block;
-            width: 100vw;
-            height: 100vh;
-        }
-    </style>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>3D Mobile Voxel Engine</title>
+    
+    <link rel="stylesheet" href="style.css">
+
+    <!-- CDN Dependencies -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/simplex-noise/2.4.0/simplex-noise.min.js"></script>
 </head>
 <body>
 
-    <!-- Three.js Library via CDN -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    
-    <!-- Our Game Logic -->
-    <script src="game.js"></script>
+    <canvas id="webgl-canvas"></canvas>
 
+    <div id="ui-overlay">
+        <!-- Hotbar Block Selector -->
+        <div id="block-selector">
+            <div class="block-option active" style="background:#4CAF50;" data-id="1"></div> <!-- Grass -->
+            <div class="block-option" style="background:#795548;" data-id="2"></div> <!-- Dirt -->
+            <div class="block-option" style="background:#8D6E63;" data-id="3"></div> <!-- Wood -->
+            <div class="block-option" style="background:#FBC02D;" data-id="4"></div> <!-- Sand -->
+            <div class="block-option" style="background:#757575;" data-id="5"></div> <!-- Stone -->
+            <div class="block-option" style="background:#2E7D32;" data-id="6"></div> <!-- Leaves -->
+        </div>
+
+        <!-- Left Controls -->
+        <div class="control-zone">
+            <div class="btn-group">
+                <button class="ctrl-btn btn-mine">L</button>
+                <button class="ctrl-btn btn-place">R</button>
+            </div>
+            <div class="joystick-base" id="joy-left">
+                <div class="joystick-knob" id="knob-left"></div>
+            </div>
+        </div>
+
+        <!-- Right Controls -->
+        <div class="control-zone">
+            <div class="btn-group">
+                <button class="ctrl-btn btn-mine">L</button>
+                <button class="ctrl-btn btn-place">R</button>
+                <button class="ctrl-btn jump-btn" id="btn-jump">JUMP</button>
+            </div>
+            <div class="joystick-base" id="joy-right">
+                <div class="joystick-knob" id="knob-right"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Engine Script -->
+    <script src="game.js"></script>
 </body>
-</html>
+                    </html>
