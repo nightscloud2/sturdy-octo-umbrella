@@ -3,8 +3,6 @@
 // ==========================================
 const CHUNK_SIZE = 16;
 const CHUNK_HEIGHT = 64; // Taller terrain for 1ft scale
-const RENDER_DISTANCE = 1; // 3x3 chunks
-
 const BLOCK_TYPES = {
     0: { name: 'Air', transparent: true },
     1: { name: 'Grass', color: 0x4CAF50 },
@@ -14,9 +12,7 @@ const BLOCK_TYPES = {
     5: { name: 'Stone', color: 0x757575 },
     6: { name: 'Leaves', color: 0x2E7D32, transparent: true }
 };
-
 let selectedBlockID = 3;
-
 
 // ==========================================
 // INITIALIZE THREE.JS SCENE
@@ -29,17 +25,13 @@ renderer.setClearColor(0x87CEEB);
 
 const scene = new THREE.Scene();
 scene.fog = new THREE.FogExp2(0x87CEEB, 0.015);
-
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
 
 const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
 scene.add(ambientLight);
-
 const dirLight = new THREE.DirectionalLight(0xffffff, 0.5);
 dirLight.position.set(50, 100, 50);
 scene.add(dirLight);
-
-const simplex = new SimplexNoise();
 
 function spawnPlayerSafely() {
     // Find highest solid block at spawn point (8, 8)
@@ -62,6 +54,7 @@ function getIndex(x, y, z) { return x + CHUNK_SIZE * (z + CHUNK_SIZE * y); }
 
 // Initialize Worker Background Thread
 const worldWorker = new Worker('./worldWorker.js');
+window.playerSpawned = false; // Prevents moving until world loads
 
 worldWorker.onmessage = function (e) {
     const { cx, cz, data } = e.data;
@@ -70,9 +63,15 @@ worldWorker.onmessage = function (e) {
     // Convert ArrayBuffer back to Uint8Array chunk
     const chunkData = new Uint8Array(data);
     chunks.set(key, { data: chunkData, mesh: null });
-
+    
     // Build visual 3D mesh on main thread
     buildChunkMesh(cx, cz);
+
+    // Wait for the center chunk (0,0) to finish before spawning
+    if (cx === 0 && cz === 0 && !window.playerSpawned) {
+        spawnPlayerSafely();
+        window.playerSpawned = true;
+    }
 };
 
 function getBlock(wx, wy, wz) {
@@ -103,8 +102,9 @@ function setBlock(wx, wy, wz, blockID) {
 }
 
 function updateWorld() {
-    const playerCX = Math.floor(camera.position.x / CHUNK_SIZE);
-    const playerCZ = Math.floor(camera.position.z / CHUNK_SIZE);
+    // Default to chunk 0,0 if camera isn't set up yet
+    const playerCX = Math.floor(camera.position.x / CHUNK_SIZE) || 0;
+    const playerCZ = Math.floor(camera.position.z / CHUNK_SIZE) || 0;
 
     for (let cx = playerCX - RENDER_DISTANCE; cx <= playerCX + RENDER_DISTANCE; cx++) {
         for (let cz = playerCZ - RENDER_DISTANCE; cz <= playerCZ + RENDER_DISTANCE; cz++) {
@@ -125,19 +125,19 @@ function updateWorld() {
 function buildChunkMesh(cx, cz) {
     const key = getChunkKey(cx, cz);
     const chunk = chunks.get(key);
-    if (!chunk) return;
+    if (!chunk || chunk.data.every(v => v === 0)) return;
     if (chunk.mesh) { scene.remove(chunk.mesh); chunk.mesh.geometry.dispose(); }
 
     const positions = [], normals = [], colors = [], indices = [];
     let vertexCount = 0;
 
     const faces = [
-        { dir: [1, 0, 0], mergeAxis: 'z', corners: [[1,0,0],[1,1,0],[1,1,1],[1,0,1]] }, // East
-        { dir: [-1, 0, 0], mergeAxis: 'z', corners: [[0,0,1],[0,1,1],[0,1,0],[0,0,0]] }, // West
-        { dir: [0, 1, 0], mergeAxis: 'x', corners: [[0,1,1],[1,1,1],[1,1,0],[0,1,0]] }, // Top
-        { dir: [0, -1, 0], mergeAxis: 'x', corners: [[0,0,0],[1,0,0],[1,0,1],[0,0,1]] }, // Bottom
-        { dir: [0, 0, 1], mergeAxis: 'x', corners: [[1,0,1],[1,1,1],[0,1,1],[0,0,1]] }, // South
-        { dir: [0, 0, -1], mergeAxis: 'x', corners: [[0,0,0],[0,1,0],[1,1,0],[1,0,0]] }  // North
+        { dir: [1, 0, 0], mergeAxis: 'z', corners: [[1,0,0],[1,1,0],[1,1,1],[1,0,1]] },
+        { dir: [-1, 0, 0], mergeAxis: 'z', corners: [[0,0,1],[0,1,1],[0,1,0],[0,0,0]] },
+        { dir: [0, 1, 0], mergeAxis: 'x', corners: [[0,1,1],[1,1,1],[1,1,0],[0,1,0]] },
+        { dir: [0, -1, 0], mergeAxis: 'x', corners: [[0,0,0],[1,0,0],[1,0,1],[0,0,1]] },
+        { dir: [0, 0, 1], mergeAxis: 'x', corners: [[1,0,1],[1,1,1],[0,1,1],[0,0,1]] },
+        { dir: [0, 0, -1], mergeAxis: 'x', corners: [[0,0,0],[0,1,0],[1,1,0],[1,0,0]] }
     ];
 
     for (const face of faces) {
@@ -225,19 +225,6 @@ function buildChunkMesh(cx, cz) {
     scene.add(chunk.mesh);
 }
 
-function updateWorld() {
-    for (let cx = -RENDER_DISTANCE; cx <= RENDER_DISTANCE; cx++) {
-        for (let cz = -RENDER_DISTANCE; cz <= RENDER_DISTANCE; cz++) {
-            const key = getChunkKey(cx, cz);
-            if (!chunks.has(key)) {
-                const data = generateChunkData(cx, cz);
-                chunks.set(key, { data, mesh: null });
-                buildChunkMesh(cx, cz);
-            }
-        }
-    }
-}
-
 // ==========================================
 // DUAL JOYSTICK & TOUCH CONTROLS
 // ==========================================
@@ -248,7 +235,6 @@ function setupJoystick(baseId, knobId, outputVector) {
     const base = document.getElementById(baseId);
     const knob = document.getElementById(knobId);
     if (!base || !knob) return; 
-
     let touchId = null;
 
     base.addEventListener('touchstart', (e) => {
@@ -281,7 +267,6 @@ function setupJoystick(baseId, knobId, outputVector) {
             }
         }
     };
-
     window.addEventListener('touchend', resetKnob);
     window.addEventListener('touchcancel', resetKnob);
 
@@ -302,7 +287,6 @@ function setupJoystick(baseId, knobId, outputVector) {
         outputVector.y = dy / maxRadius;
     }
 }
-
 setupJoystick('joy-left', 'knob-left', moveVector);
 setupJoystick('joy-right', 'knob-right', lookVector);
 
@@ -319,7 +303,6 @@ if (jumpBtn) {
         }
     });
 }
-
 document.querySelectorAll('.block-option').forEach(opt => {
     opt.addEventListener('touchstart', (e) => {
         e.preventDefault();
@@ -333,7 +316,6 @@ document.querySelectorAll('.block-option').forEach(opt => {
 // RAYCASTING (SCALED FOR 1FT REACH)
 // ==========================================
 const raycaster = new THREE.Raycaster();
-
 function raycastAction(action) {
     raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
     const hits = raycaster.intersectObjects(Array.from(chunks.values()).map(c => c.mesh).filter(Boolean));
@@ -342,7 +324,6 @@ function raycastAction(action) {
         const hit = hits[0];
         const point = hit.point;
         const normal = hit.face.normal;
-
         if (action === 'mine') {
             const targetX = Math.floor(point.x - normal.x * 0.1);
             const targetY = Math.floor(point.y - normal.y * 0.1);
@@ -370,10 +351,11 @@ function isSolidBlock(x, y, z) {
 }
 
 function updatePlayer() {
+    if (!window.playerSpawned) return; // Keep player frozen until terrain arrives
+
     yaw -= lookVector.x * 0.04;
     pitch -= lookVector.y * 0.04;
     pitch = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, pitch));
-
     camera.rotation.order = "YXZ";
     camera.rotation.y = yaw;
     camera.rotation.x = pitch;
@@ -410,16 +392,14 @@ function updatePlayer() {
 
     let { collideX, collideZ } = checkCollisionAtY(feetY);
 
-    // AUTO-STEP LOGIC: If wall hit at feet, test if 1-block step up is clear
+    // AUTO-STEP LOGIC
     if ((collideX || collideZ) && playerOnGround) {
         const stepY = feetY + STEP_HEIGHT;
         const stepResult = checkCollisionAtY(stepY);
-
-        // Check head clearance (don't auto-step into a low ceiling)
         const headClear = !isSolidBlock(camera.position.x, eyeY + STEP_HEIGHT, camera.position.z);
 
         if (!stepResult.collideX && !stepResult.collideZ && headClear) {
-            camera.position.y += STEP_HEIGHT; // Step up
+            camera.position.y += STEP_HEIGHT; 
             collideX = false;
             collideZ = false;
         }
@@ -455,17 +435,22 @@ function updatePlayer() {
     } else {
         playerOnGround = false;
     }
-        }
+}
 
 // ==========================================
 // MAIN GAME LOOP
 // ==========================================
 updateWorld();
-spawnPlayerSafely(); // Clean spawn above trees/terrain
 
 function animate() {
     requestAnimationFrame(animate);
     updatePlayer();
+    
+    // Auto-load chunks as player explores
+    if (window.playerSpawned) {
+        updateWorld();
+    }
+    
     renderer.render(scene, camera);
 }
 
