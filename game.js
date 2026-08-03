@@ -61,7 +61,7 @@ function getChunkKey(cx, cz) { return `${cx},${cz}`; }
 function getIndex(x, y, z) { return x + CHUNK_SIZE * (z + CHUNK_SIZE * y); }
 
 // Initialize Worker Background Thread
-const worldWorker = new Worker('worldWorker.js');
+const worldWorker = new Worker('./worldWorker.js');
 
 worldWorker.onmessage = function (e) {
     const { cx, cz, data } = e.data;
