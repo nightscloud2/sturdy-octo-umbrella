@@ -1,11 +1,19 @@
 // ==========================================
-// WORLD WORKER (BACKGROUND THREAD)
+// WORLD WORKER (STANDALONE NO DEPENDENCIES)
 // ==========================================
-importScripts('https://cdnjs.cloudflare.com/ajax/libs/simplex-noise/2.4.0/simplex-noise.min.js');
-
 const CHUNK_SIZE = 16;
 const CHUNK_HEIGHT = 64;
-const simplex = new SimplexNoise();
+
+// Simple, fast deterministic 2D/3D PRNG noise for worker
+function pseudoNoise2D(x, z) {
+    let n = Math.sin(x * 12.9898 + z * 78.233) * 43758.5453;
+    return n - Math.floor(n);
+}
+
+function pseudoNoise3D(x, y, z) {
+    let n = Math.sin(x * 12.9898 + y * 45.164 + z * 78.233) * 43758.5453;
+    return (n - Math.floor(n)) * 2 - 1;
+}
 
 function getIndex(x, y, z) {
     return x + CHUNK_SIZE * (z + CHUNK_SIZE * y);
@@ -20,7 +28,7 @@ function generateChunkData(cx, cz) {
             const wz = cz * CHUNK_SIZE + z;
 
             // Heightmap calculation
-            let height = Math.floor(30 + simplex.noise2D(wx * 0.015, wz * 0.015) * 18);
+            let height = Math.floor(30 + pseudoNoise2D(wx * 0.05, wz * 0.05) * 14);
 
             for (let y = 0; y < CHUNK_HEIGHT; y++) {
                 let block = 0;
@@ -31,15 +39,13 @@ function generateChunkData(cx, cz) {
                     } else if (y > height - 4) {
                         block = (height < 28) ? 4 : 2; 
                     } else {
-                        block = 5; // Stone
+                        block = 5; 
                     }
 
-                    // --- WIDER CAVE CARVING ---
-                    // Lowered noise frequency (0.018 vs 0.03) and opened threshold range (0.16)
-                    // Makes caverns roughly 12-18ft wide instead of tight 3ft crawling tunnels
-                    let caveNoise = simplex.noise3D(wx * 0.018, y * 0.022, wz * 0.018);
-                    if (Math.abs(caveNoise) < 0.16 && y < height - 3 && y > 3) {
-                        block = 0; // Air gap for cave
+                    // Spacious caves
+                    let cave = pseudoNoise3D(wx * 0.08, y * 0.08, wz * 0.08);
+                    if (Math.abs(cave) < 0.25 && y < height - 3 && y > 3) {
+                        block = 0; // Cave air gap
                     }
                 }
                 
@@ -49,9 +55,9 @@ function generateChunkData(cx, cz) {
                 }
             }
 
-            // High-res Procedural Tree Placement
-            if (height >= 28 && Math.abs(simplex.noise2D(wx * 0.85, wz * 0.85)) > 0.82) {
-                const trunkHeight = Math.floor(9 + Math.random() * 4);
+            // High-res Procedural Trees
+            if (height >= 28 && pseudoNoise2D(wx * 0.8, wz * 0.8) > 0.8) {
+                const trunkHeight = Math.floor(9 + pseudoNoise2D(wx, wz) * 4);
                 
                 for (let ty = 1; ty <= trunkHeight; ty++) {
                     if (height + ty < CHUNK_HEIGHT) {
@@ -87,11 +93,8 @@ function generateChunkData(cx, cz) {
     return data;
 }
 
-// Listen for messages from the main thread (game.js)
 self.onmessage = function (e) {
     const { cx, cz } = e.data;
     const data = generateChunkData(cx, cz);
-    
-    // Transfer raw buffer array back to main thread zero-copy
     self.postMessage({ cx, cz, data: data.buffer }, [data.buffer]);
 };
