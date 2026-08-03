@@ -432,20 +432,40 @@ function updatePlayer() {
     // Gravity
     playerVelocity.y = Math.max(-0.5, playerVelocity.y - 0.025);
 
-    // --- HORIZONTAL MOVEMENT (X & Z) ---
+    // --- HORIZONTAL MOVEMENT WITH AUTO-STEP ---
     const nextX = camera.position.x + moveDir.x;
     const nextZ = camera.position.z + moveDir.z;
-    const radius = 0.35; // Player width (approx 0.7ft wide box)
+    const radius = 0.35; // Player bounding radius
 
-    // Check foot to head levels for horizontal collisions
-    let collideX = false;
-    let collideZ = false;
-    const eyeY = camera.position.y;
-    const feetY = eyeY - 5.4;
+    let eyeY = camera.position.y;
+    let feetY = eyeY - 5.4;
+    const STEP_HEIGHT = 1.05; // Can step up 1 block high
 
-    for (let checkY = feetY; checkY <= eyeY; checkY += 1.5) {
-        if (isSolidBlock(nextX + (moveDir.x > 0 ? radius : -radius), checkY, camera.position.z)) collideX = true;
-        if (isSolidBlock(camera.position.x, checkY, nextZ + (moveDir.z > 0 ? radius : -radius))) collideZ = true;
+    // Helper to check horizontal collision at a given Y baseline
+    const checkCollisionAtY = (testY) => {
+        let collideX = false, collideZ = false;
+        for (let checkY = testY; checkY <= testY + 5.0; checkY += 1.5) {
+            if (isSolidBlock(nextX + (moveDir.x > 0 ? radius : -radius), checkY, camera.position.z)) collideX = true;
+            if (isSolidBlock(camera.position.x, checkY, nextZ + (moveDir.z > 0 ? radius : -radius))) collideZ = true;
+        }
+        return { collideX, collideZ };
+    };
+
+    let { collideX, collideZ } = checkCollisionAtY(feetY);
+
+    // AUTO-STEP LOGIC: If wall hit at feet, test if 1-block step up is clear
+    if ((collideX || collideZ) && playerOnGround) {
+        const stepY = feetY + STEP_HEIGHT;
+        const stepResult = checkCollisionAtY(stepY);
+
+        // Check head clearance (don't auto-step into a low ceiling)
+        const headClear = !isSolidBlock(camera.position.x, eyeY + STEP_HEIGHT, camera.position.z);
+
+        if (!stepResult.collideX && !stepResult.collideZ && headClear) {
+            camera.position.y += STEP_HEIGHT; // Step up
+            collideX = false;
+            collideZ = false;
+        }
     }
 
     if (!collideX) camera.position.x = nextX;
@@ -478,7 +498,7 @@ function updatePlayer() {
     } else {
         playerOnGround = false;
     }
-}
+        }
 
 // ==========================================
 // MAIN GAME LOOP
