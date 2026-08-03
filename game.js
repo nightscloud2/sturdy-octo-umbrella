@@ -17,6 +17,7 @@ const BLOCK_TYPES = {
 
 let selectedBlockID = 3;
 
+
 // ==========================================
 // INITIALIZE THREE.JS SCENE
 // ==========================================
@@ -30,7 +31,6 @@ const scene = new THREE.Scene();
 scene.fog = new THREE.FogExp2(0x87CEEB, 0.015);
 
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-camera.position.set(8, 50, 8); // Spawn point above terrain
 
 const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
 scene.add(ambientLight);
@@ -40,6 +40,16 @@ dirLight.position.set(50, 100, 50);
 scene.add(dirLight);
 
 const simplex = new SimplexNoise();
+
+function spawnPlayerSafely() {
+    // Find highest solid block at spawn point (8, 8)
+    let spawnY = CHUNK_HEIGHT - 1;
+    while (spawnY > 0 && getBlock(8, spawnY, 8) === 0) {
+        spawnY--;
+    }
+    // Place player feet above top block (eye height +5.5)
+    camera.position.set(8.5, spawnY + 1 + 5.5, 8.5);
+}
 
 // ==========================================
 // CHUNK & WORLD GENERATION (HIGH RES)
@@ -397,6 +407,11 @@ let yaw = 0, pitch = 0;
 const playerVelocity = new THREE.Vector3();
 let playerOnGround = false;
 
+function isSolidBlock(x, y, z) {
+    const blockID = getBlock(Math.floor(x), Math.floor(y), Math.floor(z));
+    return blockID !== 0 && !BLOCK_TYPES[blockID].transparent;
+}
+
 function updatePlayer() {
     yaw -= lookVector.x * 0.04;
     pitch -= lookVector.y * 0.04;
@@ -409,27 +424,55 @@ function updatePlayer() {
     const forward = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw)).normalize();
     const side = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw)).normalize();
 
-    // Balanced walking speed
-    const speed = 0.22; 
+    const speed = 0.20; 
     const moveDir = new THREE.Vector3();
     moveDir.addScaledVector(forward, -moveVector.y * speed);
     moveDir.addScaledVector(side, moveVector.x * speed);
 
-    // Gravity with terminal velocity cap
-    playerVelocity.y = Math.max(-0.6, playerVelocity.y - 0.02);
+    // Gravity
+    playerVelocity.y = Math.max(-0.5, playerVelocity.y - 0.025);
 
-    camera.position.x += moveDir.x;
-    camera.position.z += moveDir.z;
+    // --- HORIZONTAL MOVEMENT (X & Z) ---
+    const nextX = camera.position.x + moveDir.x;
+    const nextZ = camera.position.z + moveDir.z;
+    const radius = 0.35; // Player width (approx 0.7ft wide box)
+
+    // Check foot to head levels for horizontal collisions
+    let collideX = false;
+    let collideZ = false;
+    const eyeY = camera.position.y;
+    const feetY = eyeY - 5.4;
+
+    for (let checkY = feetY; checkY <= eyeY; checkY += 1.5) {
+        if (isSolidBlock(nextX + (moveDir.x > 0 ? radius : -radius), checkY, camera.position.z)) collideX = true;
+        if (isSolidBlock(camera.position.x, checkY, nextZ + (moveDir.z > 0 ? radius : -radius))) collideZ = true;
+    }
+
+    if (!collideX) camera.position.x = nextX;
+    if (!collideZ) camera.position.z = nextZ;
+
+    // --- VERTICAL MOVEMENT (Y) ---
     camera.position.y += playerVelocity.y;
+    const newFeetY = camera.position.y - 5.5;
 
-    // Multi-point collision check
-    const px = Math.floor(camera.position.x);
-    const pz = Math.floor(camera.position.z);
-    const pyFeet = Math.floor(camera.position.y - 5.5);
-    const pyWaist = Math.floor(camera.position.y - 3.0);
+    // Check corners under feet
+    const feetCorners = [
+        [camera.position.x - radius, camera.position.z - radius],
+        [camera.position.x + radius, camera.position.z - radius],
+        [camera.position.x - radius, camera.position.z + radius],
+        [camera.position.x + radius, camera.position.z + radius]
+    ];
 
-    if (getBlock(px, pyFeet, pz) !== 0 || getBlock(px, pyWaist, pz) !== 0) {
-        camera.position.y = pyFeet + 1 + 5.5;
+    let groundHit = false;
+    for (const [cx, cz] of feetCorners) {
+        if (isSolidBlock(cx, newFeetY, cz)) {
+            groundHit = true;
+            break;
+        }
+    }
+
+    if (groundHit) {
+        camera.position.y = Math.floor(newFeetY) + 1 + 5.5;
         playerVelocity.y = 0;
         playerOnGround = true;
     } else {
@@ -441,6 +484,7 @@ function updatePlayer() {
 // MAIN GAME LOOP
 // ==========================================
 updateWorld();
+spawnPlayerSafely(); // Clean spawn above trees/terrain
 
 function animate() {
     requestAnimationFrame(animate);
