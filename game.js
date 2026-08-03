@@ -2,7 +2,7 @@
 // ENGINE CONSTANTS & 1FT SCALE SETTINGS
 // ==========================================
 const CHUNK_SIZE = 16;
-const CHUNK_HEIGHT = 64; // Increased for taller terrain (1ft scale)
+const CHUNK_HEIGHT = 64; // Taller terrain for 1ft scale
 const RENDER_DISTANCE = 1; // 3x3 chunks
 
 const BLOCK_TYPES = {
@@ -27,10 +27,10 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setClearColor(0x87CEEB);
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.FogExp2(0x87CEEB, 0.015); // Slightly thinner fog for scale
+scene.fog = new THREE.FogExp2(0x87CEEB, 0.015);
 
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-camera.position.set(8, 50, 8); // Spawn higher up
+camera.position.set(8, 50, 8); // Spawn point above terrain
 
 const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
 scene.add(ambientLight);
@@ -79,14 +79,13 @@ function generateChunkData(cx, cz) {
                     }
                 }
                 
-                // Keep existing block if tree canopy from adjacent pass set it
                 const existingIdx = getIndex(x, y, z);
                 if (data[existingIdx] === 0) {
                     data[existingIdx] = block;
                 }
             }
 
-            // High-res Procedural Tree Placement (Grass only)
+            // High-res Procedural Tree Placement (Grass surface only)
             if (height >= 28 && Math.abs(simplex.noise2D(wx * 0.85, wz * 0.85)) > 0.82) {
                 const trunkHeight = Math.floor(9 + Math.random() * 4); // 9-12 ft tall trunk
                 
@@ -97,7 +96,7 @@ function generateChunkData(cx, cz) {
                     }
                 }
 
-                // Full Spherical Canopy (Leaves radius: 3ft)
+                // Rounded Voxel Cube Canopy (Radius: 3ft)
                 const canopyCenterY = height + trunkHeight;
                 const radius = 3;
 
@@ -110,7 +109,6 @@ function generateChunkData(cx, cz) {
                                 let tz = z + lz;
                                 let ty = canopyCenterY + ly;
 
-                                // Bounds check within chunk
                                 if (tx >= 0 && tx < CHUNK_SIZE && tz >= 0 && tz < CHUNK_SIZE && ty > 0 && ty < CHUNK_HEIGHT) {
                                     let idx = getIndex(tx, ty, tz);
                                     if (data[idx] === 0) {
@@ -127,6 +125,33 @@ function generateChunkData(cx, cz) {
     return data;
 }
 
+function getBlock(wx, wy, wz) {
+    const cx = Math.floor(wx / CHUNK_SIZE), cz = Math.floor(wz / CHUNK_SIZE);
+    const chunk = chunks.get(getChunkKey(cx, cz));
+    if (!chunk) return 0;
+    const lx = ((wx % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+    const lz = ((wz % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+    if (wy < 0 || wy >= CHUNK_HEIGHT) return 0;
+    return chunk.data[getIndex(lx, wy, lz)];
+}
+
+function setBlock(wx, wy, wz, blockID) {
+    const cx = Math.floor(wx / CHUNK_SIZE), cz = Math.floor(wz / CHUNK_SIZE);
+    const chunk = chunks.get(getChunkKey(cx, cz));
+    if (!chunk) return;
+    const lx = ((wx % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+    const lz = ((wz % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+    if (wy < 0 || wy >= CHUNK_HEIGHT) return;
+    
+    chunk.data[getIndex(lx, wy, lz)] = blockID;
+    buildChunkMesh(cx, cz);
+
+    if (lx === 0) buildChunkMesh(cx - 1, cz);
+    if (lx === CHUNK_SIZE - 1) buildChunkMesh(cx + 1, cz);
+    if (lz === 0) buildChunkMesh(cx, cz - 1);
+    if (lz === CHUNK_SIZE - 1) buildChunkMesh(cx, cz + 1);
+}
+
 // ==========================================
 // 1D GREEDY MESHER
 // ==========================================
@@ -139,7 +164,6 @@ function buildChunkMesh(cx, cz) {
     const positions = [], normals = [], colors = [], indices = [];
     let vertexCount = 0;
 
-    // mergeAxis defines which direction we stretch identical blocks
     const faces = [
         { dir: [1, 0, 0], mergeAxis: 'z', corners: [[1,0,0],[1,1,0],[1,1,1],[1,0,1]] }, // East
         { dir: [-1, 0, 0], mergeAxis: 'z', corners: [[0,0,1],[0,1,1],[0,1,0],[0,0,0]] }, // West
@@ -158,7 +182,6 @@ function buildChunkMesh(cx, cz) {
             const c = new THREE.Color(hex).multiplyScalar(shade);
 
             for (const corner of face.corners) {
-                // Stretch the quad based on the run length along the specified axis
                 let px = wx + (corner[0] === 1 && face.mergeAxis === 'x' ? run.length : corner[0]);
                 let py = run.y + corner[1];
                 let pz = wz + (corner[2] === 1 && face.mergeAxis === 'z' ? run.length : corner[2]);
@@ -197,7 +220,6 @@ function buildChunkMesh(cx, cz) {
                 }
             }
         } else {
-            // mergeAxis === 'z'
             for (let y = 0; y < CHUNK_HEIGHT; y++) {
                 for (let x = 0; x < CHUNK_SIZE; x++) {
                     let currentRun = null;
@@ -325,7 +347,7 @@ if (jumpBtn) {
     jumpBtn.addEventListener('touchstart', (e) => {
         e.preventDefault();
         if (playerOnGround) {
-            playerVelocity.y = 0.45; // Scaled up jump for 1ft blocks
+            playerVelocity.y = 0.45; // Jump strength for 1ft scale
             playerOnGround = false;
         }
     });
@@ -349,7 +371,7 @@ function raycastAction(action) {
     raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
     const hits = raycaster.intersectObjects(Array.from(chunks.values()).map(c => c.mesh).filter(Boolean));
 
-    if (hits.length > 0 && hits[0].distance < 18) { // Reach extended to ~18 feet
+    if (hits.length > 0 && hits[0].distance < 18) {
         const hit = hits[0];
         const point = hit.point;
         const normal = hit.face.normal;
@@ -369,7 +391,7 @@ function raycastAction(action) {
 }
 
 // ==========================================
-// SCALED PLAYER PHYSICS
+// SCALED PLAYER PHYSICS & MULTI-POINT COLLISION
 // ==========================================
 let yaw = 0, pitch = 0;
 const playerVelocity = new THREE.Vector3();
@@ -387,26 +409,25 @@ function updatePlayer() {
     const forward = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw)).normalize();
     const side = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw)).normalize();
 
-    // Tuned down movement speed (was 0.35)
+    // Balanced walking speed
     const speed = 0.22; 
     const moveDir = new THREE.Vector3();
     moveDir.addScaledVector(forward, -moveVector.y * speed);
     moveDir.addScaledVector(side, moveVector.x * speed);
 
-    // Apply gravity with a terminal velocity cap to prevent clipping
+    // Gravity with terminal velocity cap
     playerVelocity.y = Math.max(-0.6, playerVelocity.y - 0.02);
 
     camera.position.x += moveDir.x;
     camera.position.z += moveDir.z;
     camera.position.y += playerVelocity.y;
 
-    // Robust multi-point feet check (prevents clipping through ground)
+    // Multi-point collision check
     const px = Math.floor(camera.position.x);
     const pz = Math.floor(camera.position.z);
-    const pyFeet = Math.floor(camera.position.y - 5.5); // Feet level
-    const pyWaist = Math.floor(camera.position.y - 3.0); // Waist level
+    const pyFeet = Math.floor(camera.position.y - 5.5);
+    const pyWaist = Math.floor(camera.position.y - 3.0);
 
-    // Check feet collision
     if (getBlock(px, pyFeet, pz) !== 0 || getBlock(px, pyWaist, pz) !== 0) {
         camera.position.y = pyFeet + 1 + 5.5;
         playerVelocity.y = 0;
