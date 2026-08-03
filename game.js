@@ -52,88 +52,28 @@ function spawnPlayerSafely() {
 }
 
 // ==========================================
-// CHUNK & WORLD GENERATION (HIGH RES)
+// ASYNC WORKER & WORLD GENERATION
 // ==========================================
+const RENDER_DISTANCE = 2; // Expanded world render area!
 const chunks = new Map();
 
 function getChunkKey(cx, cz) { return `${cx},${cz}`; }
 function getIndex(x, y, z) { return x + CHUNK_SIZE * (z + CHUNK_SIZE * y); }
 
-function generateChunkData(cx, cz) {
-    const data = new Uint8Array(CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE);
+// Initialize Worker Background Thread
+const worldWorker = new Worker('worldWorker.js');
 
-    for (let x = 0; x < CHUNK_SIZE; x++) {
-        for (let z = 0; z < CHUNK_SIZE; z++) {
-            const wx = cx * CHUNK_SIZE + x;
-            const wz = cz * CHUNK_SIZE + z;
+worldWorker.onmessage = function (e) {
+    const { cx, cz, data } = e.data;
+    const key = getChunkKey(cx, cz);
+    
+    // Convert ArrayBuffer back to Uint8Array chunk
+    const chunkData = new Uint8Array(data);
+    chunks.set(key, { data: chunkData, mesh: null });
 
-            // Heightmap calculation
-            let height = Math.floor(30 + simplex.noise2D(wx * 0.015, wz * 0.015) * 18);
-
-            for (let y = 0; y < CHUNK_HEIGHT; y++) {
-                let block = 0;
-
-                if (y <= height) {
-                    if (y === height) {
-                        block = (height < 28) ? 4 : 1; 
-                    } else if (y > height - 4) {
-                        block = (height < 28) ? 4 : 2; 
-                    } else {
-                        block = 5; 
-                    }
-
-                    // 3D Cave carving
-                    let density = simplex.noise3D(wx * 0.03, y * 0.03, wz * 0.03);
-                    if (Math.abs(density) < 0.08 && y < height - 2 && y > 5) {
-                        block = 0; 
-                    }
-                }
-                
-                const existingIdx = getIndex(x, y, z);
-                if (data[existingIdx] === 0) {
-                    data[existingIdx] = block;
-                }
-            }
-
-            // High-res Procedural Tree Placement (Grass surface only)
-            if (height >= 28 && Math.abs(simplex.noise2D(wx * 0.85, wz * 0.85)) > 0.82) {
-                const trunkHeight = Math.floor(9 + Math.random() * 4); // 9-12 ft tall trunk
-                
-                // Solid Wood Trunk
-                for (let ty = 1; ty <= trunkHeight; ty++) {
-                    if (height + ty < CHUNK_HEIGHT) {
-                        data[getIndex(x, height + ty, z)] = 3; 
-                    }
-                }
-
-                // Rounded Voxel Cube Canopy (Radius: 3ft)
-                const canopyCenterY = height + trunkHeight;
-                const radius = 3;
-
-                for (let lx = -radius; lx <= radius; lx++) {
-                    for (let lz = -radius; lz <= radius; lz++) {
-                        for (let ly = -radius; ly <= radius + 1; ly++) {
-                            const distSq = (lx * lx) + (ly * ly * 0.8) + (lz * lz);
-                            if (distSq <= (radius * radius) + 0.5) {
-                                let tx = x + lx;
-                                let tz = z + lz;
-                                let ty = canopyCenterY + ly;
-
-                                if (tx >= 0 && tx < CHUNK_SIZE && tz >= 0 && tz < CHUNK_SIZE && ty > 0 && ty < CHUNK_HEIGHT) {
-                                    let idx = getIndex(tx, ty, tz);
-                                    if (data[idx] === 0) {
-                                        data[idx] = 6; // Leaves
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    return data;
-}
+    // Build visual 3D mesh on main thread
+    buildChunkMesh(cx, cz);
+};
 
 function getBlock(wx, wy, wz) {
     const cx = Math.floor(wx / CHUNK_SIZE), cz = Math.floor(wz / CHUNK_SIZE);
@@ -160,6 +100,23 @@ function setBlock(wx, wy, wz, blockID) {
     if (lx === CHUNK_SIZE - 1) buildChunkMesh(cx + 1, cz);
     if (lz === 0) buildChunkMesh(cx, cz - 1);
     if (lz === CHUNK_SIZE - 1) buildChunkMesh(cx, cz + 1);
+}
+
+function updateWorld() {
+    const playerCX = Math.floor(camera.position.x / CHUNK_SIZE);
+    const playerCZ = Math.floor(camera.position.z / CHUNK_SIZE);
+
+    for (let cx = playerCX - RENDER_DISTANCE; cx <= playerCX + RENDER_DISTANCE; cx++) {
+        for (let cz = playerCZ - RENDER_DISTANCE; cz <= playerCZ + RENDER_DISTANCE; cz++) {
+            const key = getChunkKey(cx, cz);
+            if (!chunks.has(key)) {
+                // Reserve key to prevent double requests
+                chunks.set(key, { data: new Uint8Array(CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE), mesh: null });
+                // Offload math to background thread
+                worldWorker.postMessage({ cx, cz });
+            }
+        }
+    }
 }
 
 // ==========================================
