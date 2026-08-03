@@ -57,7 +57,7 @@ function generateChunkData(cx, cz) {
             const wx = cx * CHUNK_SIZE + x;
             const wz = cz * CHUNK_SIZE + z;
 
-            // Smoother, taller terrain for 1ft scale
+            // Heightmap calculation
             let height = Math.floor(30 + simplex.noise2D(wx * 0.015, wz * 0.015) * 18);
 
             for (let y = 0; y < CHUNK_HEIGHT; y++) {
@@ -72,30 +72,50 @@ function generateChunkData(cx, cz) {
                         block = 5; 
                     }
 
-                    // 3D Cave carving (scaled up)
+                    // 3D Cave carving
                     let density = simplex.noise3D(wx * 0.03, y * 0.03, wz * 0.03);
                     if (Math.abs(density) < 0.08 && y < height - 2 && y > 5) {
                         block = 0; 
                     }
                 }
-                data[getIndex(x, y, z)] = block;
+                
+                // Keep existing block if tree canopy from adjacent pass set it
+                const existingIdx = getIndex(x, y, z);
+                if (data[existingIdx] === 0) {
+                    data[existingIdx] = block;
+                }
             }
 
-            // High-res Tree Placement
-            if (height >= 28 && Math.abs(simplex.noise2D(wx * 0.5, wz * 0.5)) > 0.85) {
-                const trunkHeight = Math.floor(8 + Math.random() * 5); // 8-12 ft tall trunks
+            // High-res Procedural Tree Placement (Grass only)
+            if (height >= 28 && Math.abs(simplex.noise2D(wx * 0.85, wz * 0.85)) > 0.82) {
+                const trunkHeight = Math.floor(9 + Math.random() * 4); // 9-12 ft tall trunk
+                
+                // Solid Wood Trunk
                 for (let ty = 1; ty <= trunkHeight; ty++) {
-                    if (height + ty < CHUNK_HEIGHT) data[getIndex(x, height + ty, z)] = 3; 
+                    if (height + ty < CHUNK_HEIGHT) {
+                        data[getIndex(x, height + ty, z)] = 3; 
+                    }
                 }
-                // Voxel diamond canopy
-                for (let lx = -2; lx <= 2; lx++) {
-                    for (let lz = -2; lz <= 2; lz++) {
-                        for (let ly = trunkHeight - 2; ly <= trunkHeight + 2; ly++) {
-                            if (Math.abs(lx) + Math.abs(ly - trunkHeight) + Math.abs(lz) <= 3) {
-                                let tx = x + lx, tz = z + lz, ty = height + ly;
-                                if (tx >= 0 && tx < CHUNK_SIZE && tz >= 0 && tz < CHUNK_SIZE && ty < CHUNK_HEIGHT) {
+
+                // Full Spherical Canopy (Leaves radius: 3ft)
+                const canopyCenterY = height + trunkHeight;
+                const radius = 3;
+
+                for (let lx = -radius; lx <= radius; lx++) {
+                    for (let lz = -radius; lz <= radius; lz++) {
+                        for (let ly = -radius; ly <= radius + 1; ly++) {
+                            const distSq = (lx * lx) + (ly * ly * 0.8) + (lz * lz);
+                            if (distSq <= (radius * radius) + 0.5) {
+                                let tx = x + lx;
+                                let tz = z + lz;
+                                let ty = canopyCenterY + ly;
+
+                                // Bounds check within chunk
+                                if (tx >= 0 && tx < CHUNK_SIZE && tz >= 0 && tz < CHUNK_SIZE && ty > 0 && ty < CHUNK_HEIGHT) {
                                     let idx = getIndex(tx, ty, tz);
-                                    if (data[idx] === 0) data[idx] = 6; 
+                                    if (data[idx] === 0) {
+                                        data[idx] = 6; // Leaves
+                                    }
                                 }
                             }
                         }
@@ -105,33 +125,6 @@ function generateChunkData(cx, cz) {
         }
     }
     return data;
-}
-
-function getBlock(wx, wy, wz) {
-    const cx = Math.floor(wx / CHUNK_SIZE), cz = Math.floor(wz / CHUNK_SIZE);
-    const chunk = chunks.get(getChunkKey(cx, cz));
-    if (!chunk) return 0;
-    const lx = ((wx % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
-    const lz = ((wz % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
-    if (wy < 0 || wy >= CHUNK_HEIGHT) return 0;
-    return chunk.data[getIndex(lx, wy, lz)];
-}
-
-function setBlock(wx, wy, wz, blockID) {
-    const cx = Math.floor(wx / CHUNK_SIZE), cz = Math.floor(wz / CHUNK_SIZE);
-    const chunk = chunks.get(getChunkKey(cx, cz));
-    if (!chunk) return;
-    const lx = ((wx % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
-    const lz = ((wz % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
-    if (wy < 0 || wy >= CHUNK_HEIGHT) return;
-    
-    chunk.data[getIndex(lx, wy, lz)] = blockID;
-    buildChunkMesh(cx, cz);
-
-    if (lx === 0) buildChunkMesh(cx - 1, cz);
-    if (lx === CHUNK_SIZE - 1) buildChunkMesh(cx + 1, cz);
-    if (lz === 0) buildChunkMesh(cx, cz - 1);
-    if (lz === CHUNK_SIZE - 1) buildChunkMesh(cx, cz + 1);
 }
 
 // ==========================================
@@ -394,23 +387,28 @@ function updatePlayer() {
     const forward = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw)).normalize();
     const side = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw)).normalize();
 
-    const speed = 0.35; // Scaled up movement speed
+    // Tuned down movement speed (was 0.35)
+    const speed = 0.22; 
     const moveDir = new THREE.Vector3();
     moveDir.addScaledVector(forward, -moveVector.y * speed);
     moveDir.addScaledVector(side, moveVector.x * speed);
 
-    playerVelocity.y -= 0.025; // Scaled up gravity
+    // Apply gravity with a terminal velocity cap to prevent clipping
+    playerVelocity.y = Math.max(-0.6, playerVelocity.y - 0.02);
 
     camera.position.x += moveDir.x;
     camera.position.z += moveDir.z;
     camera.position.y += playerVelocity.y;
 
+    // Robust multi-point feet check (prevents clipping through ground)
     const px = Math.floor(camera.position.x);
-    const py = Math.floor(camera.position.y - 5.5); // Player eye level is 5.5 ft up
     const pz = Math.floor(camera.position.z);
+    const pyFeet = Math.floor(camera.position.y - 5.5); // Feet level
+    const pyWaist = Math.floor(camera.position.y - 3.0); // Waist level
 
-    if (getBlock(px, py, pz) !== 0) {
-        camera.position.y = py + 1 + 5.5;
+    // Check feet collision
+    if (getBlock(px, pyFeet, pz) !== 0 || getBlock(px, pyWaist, pz) !== 0) {
+        camera.position.y = pyFeet + 1 + 5.5;
         playerVelocity.y = 0;
         playerOnGround = true;
     } else {
