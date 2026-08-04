@@ -21,18 +21,17 @@ function getIndex(x, y, z) {
 
 function generateChunkData(cx, cz) {
     const data = new Uint8Array(CHUNK_SIZE * CHUNK_HEIGHT * CHUNK_SIZE);
-
+    
     for (let x = 0; x < CHUNK_SIZE; x++) {
         for (let z = 0; z < CHUNK_SIZE; z++) {
             const wx = cx * CHUNK_SIZE + x;
             const wz = cz * CHUNK_SIZE + z;
-
-            // Heightmap calculation
-            let height = Math.floor(30 + pseudoNoise2D(wx * 0.05, wz * 0.05) * 14);
-
+            
+            // Scaled down frequency for larger, sweeping hills (1ft scale)
+            let height = Math.floor(30 + pseudoNoise2D(wx * 0.015, wz * 0.015) * 20);
+            
             for (let y = 0; y < CHUNK_HEIGHT; y++) {
                 let block = 0;
-
                 if (y <= height) {
                     if (y === height) {
                         block = (height < 28) ? 4 : 1; 
@@ -41,10 +40,10 @@ function generateChunkData(cx, cz) {
                     } else {
                         block = 5; 
                     }
-
-                    // Spacious caves
-                    let cave = pseudoNoise3D(wx * 0.08, y * 0.08, wz * 0.08);
-                    if (Math.abs(cave) < 0.25 && y < height - 3 && y > 3) {
+                    
+                    // CAVES: Scaled up for 1ft blocks
+                    let cave = pseudoNoise3D(wx * 0.025, y * 0.025, wz * 0.025);
+                    if (Math.abs(cave) < 0.15 && y < height - 3 && y > 3) {
                         block = 0; // Cave air gap
                     }
                 }
@@ -54,20 +53,21 @@ function generateChunkData(cx, cz) {
                     data[existingIdx] = block;
                 }
             }
-
-            // High-res Procedural Trees
-            if (height >= 28 && pseudoNoise2D(wx * 0.8, wz * 0.8) > 0.8) {
-                const trunkHeight = Math.floor(9 + pseudoNoise2D(wx, wz) * 4);
+            
+            // Sparser forests (> 0.97), but physically much larger trees for 1ft scale
+            if (height >= 28 && pseudoNoise2D(wx * 0.5, wz * 0.5) > 0.97) {
+                // Tree trunks are now 15 to 25 blocks (feet) tall
+                const trunkHeight = Math.floor(15 + pseudoNoise2D(wx, wz) * 10);
                 
                 for (let ty = 1; ty <= trunkHeight; ty++) {
                     if (height + ty < CHUNK_HEIGHT) {
                         data[getIndex(x, height + ty, z)] = 3; 
                     }
                 }
-
+                
                 const canopyCenterY = height + trunkHeight;
-                const radius = 3;
-
+                const radius = 5; // 10-foot wide canopy
+                
                 for (let lx = -radius; lx <= radius; lx++) {
                     for (let lz = -radius; lz <= radius; lz++) {
                         for (let ly = -radius; ly <= radius + 1; ly++) {
@@ -76,7 +76,6 @@ function generateChunkData(cx, cz) {
                                 let tx = x + lx;
                                 let tz = z + lz;
                                 let ty = canopyCenterY + ly;
-
                                 if (tx >= 0 && tx < CHUNK_SIZE && tz >= 0 && tz < CHUNK_SIZE && ty > 0 && ty < CHUNK_HEIGHT) {
                                     let idx = getIndex(tx, ty, tz);
                                     if (data[idx] === 0) {
