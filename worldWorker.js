@@ -4,15 +4,56 @@
 const CHUNK_SIZE = 16;
 const CHUNK_HEIGHT = 64;
 
-// Simple, fast deterministic 2D/3D PRNG noise for worker
-function pseudoNoise2D(x, z) {
+// Hashing functions (White Noise)
+function hash2D(x, z) {
     let n = Math.sin(x * 12.9898 + z * 78.233) * 43758.5453;
     return n - Math.floor(n);
 }
 
-function pseudoNoise3D(x, y, z) {
+function hash3D(x, y, z) {
     let n = Math.sin(x * 12.9898 + y * 45.164 + z * 78.233) * 43758.5453;
-    return (n - Math.floor(n)) * 2 - 1;
+    return n - Math.floor(n);
+}
+
+// Smooth Value Noise (Interpolation for real rolling hills)
+function smoothNoise2D(x, z) {
+    let ix = Math.floor(x), iz = Math.floor(z);
+    let fx = x - ix, fz = z - iz;
+    
+    let ux = fx * fx * (3.0 - 2.0 * fx);
+    let uz = fz * fz * (3.0 - 2.0 * fz);
+    
+    let v1 = hash2D(ix, iz), v2 = hash2D(ix + 1, iz);
+    let v3 = hash2D(ix, iz + 1), v4 = hash2D(ix + 1, iz + 1);
+    
+    let i1 = v1 * (1.0 - ux) + v2 * ux;
+    let i2 = v3 * (1.0 - ux) + v4 * ux;
+    
+    return i1 * (1.0 - uz) + i2 * uz;
+}
+
+function smoothNoise3D(x, y, z) {
+    let ix = Math.floor(x), iy = Math.floor(y), iz = Math.floor(z);
+    let fx = x - ix, fy = y - iy, fz = z - iz;
+
+    let ux = fx * fx * (3.0 - 2.0 * fx);
+    let uy = fy * fy * (3.0 - 2.0 * fy);
+    let uz = fz * fz * (3.0 - 2.0 * fz);
+
+    let c000 = hash3D(ix, iy, iz), c100 = hash3D(ix+1, iy, iz);
+    let c010 = hash3D(ix, iy+1, iz), c110 = hash3D(ix+1, iy+1, iz);
+    let c001 = hash3D(ix, iy, iz+1), c101 = hash3D(ix+1, iy, iz+1);
+    let c011 = hash3D(ix, iy+1, iz+1), c111 = hash3D(ix+1, iy+1, iz+1);
+
+    let x00 = c000*(1-ux) + c100*ux;
+    let x10 = c010*(1-ux) + c110*ux;
+    let x01 = c001*(1-ux) + c101*ux;
+    let x11 = c011*(1-ux) + c111*ux;
+
+    let y0 = x00*(1-uy) + x10*uy;
+    let y1 = x01*(1-uy) + x11*uy;
+
+    return y0*(1-uz) + y1*uz; 
 }
 
 function getIndex(x, y, z) {
@@ -27,24 +68,24 @@ function generateChunkData(cx, cz) {
             const wx = cx * CHUNK_SIZE + x;
             const wz = cz * CHUNK_SIZE + z;
             
-            // Scaled down frequency for larger, sweeping hills (1ft scale)
-            let height = Math.floor(30 + pseudoNoise2D(wx * 0.015, wz * 0.015) * 20);
+            // Lowered base height (15) so max terrain height is ~27, leaving room for trees
+            let height = Math.floor(15 + smoothNoise2D(wx * 0.05, wz * 0.05) * 12);
             
             for (let y = 0; y < CHUNK_HEIGHT; y++) {
                 let block = 0;
                 if (y <= height) {
                     if (y === height) {
-                        block = (height < 28) ? 4 : 1; 
+                        block = (height < 14) ? 4 : 1; 
                     } else if (y > height - 4) {
-                        block = (height < 28) ? 4 : 2; 
+                        block = (height < 14) ? 4 : 2; 
                     } else {
                         block = 5; 
                     }
                     
-                    // CAVES: Scaled up for 1ft blocks
-                    let cave = pseudoNoise3D(wx * 0.025, y * 0.025, wz * 0.025);
-                    if (Math.abs(cave) < 0.15 && y < height - 3 && y > 3) {
-                        block = 0; // Cave air gap
+                    // CAVES: Smooth tunnels that don't shred the surface
+                    let cave = smoothNoise3D(wx * 0.05, y * 0.05, wz * 0.05);
+                    if (Math.abs(cave - 0.5) < 0.1 && y < height - 6 && y > 2) {
+                        block = 0; 
                     }
                 }
                 
@@ -54,10 +95,9 @@ function generateChunkData(cx, cz) {
                 }
             }
             
-            // Sparser forests (> 0.97), but physically much larger trees for 1ft scale
-            if (height >= 28 && pseudoNoise2D(wx * 0.5, wz * 0.5) > 0.97) {
-                // Tree trunks are now 15 to 25 blocks (feet) tall
-                const trunkHeight = Math.floor(15 + pseudoNoise2D(wx, wz) * 10);
+            // Scaled 1ft trees that actually fit under the Y=64 ceiling
+            if (height >= 14 && hash2D(wx, wz) > 0.98) {
+                const trunkHeight = Math.floor(12 + hash2D(wx * 1.5, wz * 1.5) * 8); // 12 to 20 blocks tall
                 
                 for (let ty = 1; ty <= trunkHeight; ty++) {
                     if (height + ty < CHUNK_HEIGHT) {
@@ -66,7 +106,7 @@ function generateChunkData(cx, cz) {
                 }
                 
                 const canopyCenterY = height + trunkHeight;
-                const radius = 5; // 10-foot wide canopy
+                const radius = 4; // 8-foot wide canopy
                 
                 for (let lx = -radius; lx <= radius; lx++) {
                     for (let lz = -radius; lz <= radius; lz++) {
