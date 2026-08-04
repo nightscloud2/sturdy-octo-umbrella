@@ -347,7 +347,7 @@ let playerOnGround = false;
 
 function isSolidBlock(x, y, z) {
     const blockID = getBlock(Math.floor(x), Math.floor(y), Math.floor(z));
-    return blockID !== 0 && !BLOCK_TYPES[blockID].transparent;
+    return blockID !== 0;
 }
 
 function updatePlayer() {
