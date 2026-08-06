@@ -74,31 +74,47 @@ worldWorker.onmessage = function (e) {
     }
 };
 
-function getBlock(wx, wy, wz) {
-    const cx = Math.floor(wx / CHUNK_SIZE), cz = Math.floor(wz / CHUNK_SIZE);
-    const chunk = chunks.get(getChunkKey(cx, cz));
-    if (!chunk) return 0;
-    const lx = ((wx % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
-    const lz = ((wz % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
-    if (wy < 0 || wy >= CHUNK_HEIGHT) return 0;
-    return chunk.data[getIndex(lx, wy, lz)];
+function getBlock(x, y, z) {
+    if (y < 0 || y >= 768) return 0;
+    const cx = Math.floor(x / CHUNK_SIZE);
+    const cz = Math.floor(z / CHUNK_SIZE);
+    const key = `${cx},${cz}`;
+    const chunk = chunks.get(key);
+    
+    if (!chunk || !chunk.data) return 0;
+    
+    // If checking above the chunk's dynamically allocated height, it's just air
+    if (y >= chunk.allocatedHeight) return 0;
+
+    const lx = x - cx * CHUNK_SIZE;
+    const lz = z - cz * CHUNK_SIZE;
+    return chunk.data[lx + CHUNK_SIZE * (lz + CHUNK_SIZE * y)];
 }
 
-function setBlock(wx, wy, wz, blockID) {
-    const cx = Math.floor(wx / CHUNK_SIZE), cz = Math.floor(wz / CHUNK_SIZE);
-    const chunk = chunks.get(getChunkKey(cx, cz));
-    if (!chunk) return;
-    const lx = ((wx % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
-    const lz = ((wz % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
-    if (wy < 0 || wy >= CHUNK_HEIGHT) return;
+function setBlock(x, y, z, id) {
+    if (y < 0 || y >= 768) return;
+    const cx = Math.floor(x / CHUNK_SIZE);
+    const cz = Math.floor(z / CHUNK_SIZE);
+    const key = `${cx},${cz}`;
+    let chunk = chunks.get(key);
     
-    chunk.data[getIndex(lx, wy, lz)] = blockID;
-    buildChunkMesh(cx, cz);
+    if (!chunk || !chunk.data) return;
 
-    if (lx === 0) buildChunkMesh(cx - 1, cz);
-    if (lx === CHUNK_SIZE - 1) buildChunkMesh(cx + 1, cz);
-    if (lz === 0) buildChunkMesh(cx, cz - 1);
-    if (lz === CHUNK_SIZE - 1) buildChunkMesh(cx, cz + 1);
+    const lx = x - cx * CHUNK_SIZE;
+    const lz = z - cz * CHUNK_SIZE;
+
+    // If placing a block above the current array limit, expand the array dynamically
+    if (y >= chunk.allocatedHeight) {
+        const newHeight = y + 1;
+        const newData = new Uint8Array(CHUNK_SIZE * newHeight * CHUNK_SIZE);
+        // Copy old data into new expanded array
+        newData.set(chunk.data);
+        chunk.data = newData;
+        chunk.allocatedHeight = newHeight;
+    }
+
+    chunk.data[lx + CHUNK_SIZE * (lz + CHUNK_SIZE * y)] = id;
+    chunk.dirty = true; // Queue for remeshing
 }
 
 function updateWorld() {
