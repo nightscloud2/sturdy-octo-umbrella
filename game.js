@@ -261,7 +261,53 @@ devMenu.appendChild(freeCamBtn);
 
 
 // ==========================================
-// SPLIT-SCREEN TOUCH CONTROLS
+// CONTINUOUS MINING & PLACING ENGINE
+// ==========================================
+const raycaster = new THREE.Raycaster();
+let mineInterval = null;
+
+function raycastAction(action) {
+    // Always raycast from the dead center of the screen (where the crosshair is)
+    raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+    const hits = raycaster.intersectObjects(Array.from(chunks.values()).map(c => c.mesh).filter(Boolean));
+
+    if (hits.length > 0 && hits[0].distance < 18) {
+        const hit = hits[0];
+        const point = hit.point;
+        const normal = hit.face.normal;
+        
+        if (action === 'mine') {
+            const targetX = Math.floor(point.x - normal.x * 0.1);
+            const targetY = Math.floor(point.y - normal.y * 0.1);
+            const targetZ = Math.floor(point.z - normal.z * 0.1);
+            setBlock(targetX, targetY, targetZ, 0);
+        } else if (action === 'place') {
+            const targetX = Math.floor(point.x + normal.x * 0.1);
+            const targetY = Math.floor(point.y + normal.y * 0.1);
+            const targetZ = Math.floor(point.z + normal.z * 0.1);
+            setBlock(targetX, targetY, targetZ, selectedBlockID);
+        }
+    }
+}
+
+function startContinuousMining() {
+    if (mineInterval) return;
+    raycastAction('mine'); // Fire first block break immediately
+    mineInterval = setInterval(() => {
+        raycastAction('mine'); // Keep breaking blocks every 200ms while holding
+    }, 200);
+}
+
+function stopContinuousMining() {
+    if (mineInterval) {
+        clearInterval(mineInterval);
+        mineInterval = null;
+    }
+}
+
+
+// ==========================================
+// SPLIT-SCREEN TOUCH CONTROLS WITH TAP/HOLD
 // ==========================================
 const moveVector = { x: 0, y: 0 };
 let leftTouchId = null;
@@ -269,25 +315,37 @@ let rightTouchId = null;
 let leftTouchStart = { x: 0, y: 0 };
 let rightTouchPrev = { x: 0, y: 0 };
 
+let rightTouchStartTime = 0;
+let rightTouchMoved = false;
+let holdTimer = null;
+
 window.addEventListener('touchstart', (e) => {
-    // Ignore touches on UI buttons so they don't spin the camera
     if (e.target.closest('button') || e.target.closest('.block-option') || e.target.closest('.dev-ui')) return;
 
     for (let i = 0; i < e.changedTouches.length; i++) {
         let touch = e.changedTouches[i];
         if (touch.clientX < window.innerWidth / 2) {
-            // Left half: Floating Joystick start
+            // Left half: Movement
             if (leftTouchId === null) {
                 leftTouchId = touch.identifier;
                 leftTouchStart.x = touch.clientX;
                 leftTouchStart.y = touch.clientY;
             }
         } else {
-            // Right half: Drag-to-look start
+            // Right half: Look & Mine/Place
             if (rightTouchId === null) {
                 rightTouchId = touch.identifier;
                 rightTouchPrev.x = touch.clientX;
                 rightTouchPrev.y = touch.clientY;
+                rightTouchStartTime = Date.now();
+                rightTouchMoved = false;
+
+                // Start hold timer for continuous mining (triggers after 250ms hold)
+                holdTimer = setTimeout(() => {
+                    if (!rightTouchMoved) {
+                        startContinuousMining();
+                    }
+                }, 250);
             }
         }
     }
@@ -298,7 +356,6 @@ window.addEventListener('touchmove', (e) => {
         let touch = e.changedTouches[i];
         
         if (touch.identifier === leftTouchId) {
-            // Calculate movement vector (capped at 50px drag radius)
             let dx = touch.clientX - leftTouchStart.x;
             let dy = touch.clientY - leftTouchStart.y;
             const maxRadius = 50;
@@ -312,14 +369,17 @@ window.addEventListener('touchmove', (e) => {
             moveVector.y = dy / maxRadius;
             
         } else if (touch.identifier === rightTouchId) {
-            // Calculate look deltas
             let dx = touch.clientX - rightTouchPrev.x;
             let dy = touch.clientY - rightTouchPrev.y;
             
-            yaw -= dx * 0.005;   // Look sensitivity
-            pitch -= dy * 0.005; // Look sensitivity
-            
-            // Clamp looking straight up or down
+            // If thumb moves more than 5px, mark as drag (cancels tap-to-place)
+            if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+                rightTouchMoved = true;
+                clearTimeout(holdTimer); // Cancel hold-to-mine if moving camera
+            }
+
+            yaw -= dx * 0.005;   
+            pitch -= dy * 0.005; 
             pitch = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, pitch));
             
             rightTouchPrev.x = touch.clientX;
@@ -337,63 +397,20 @@ const handleTouchEnd = (e) => {
             moveVector.y = 0;
         } else if (touch.identifier === rightTouchId) {
             rightTouchId = null;
+            clearTimeout(holdTimer);
+            stopContinuousMining();
+
+            // If thumb didn't move and touch was short (< 250ms), register as a PLACE block tap
+            const touchDuration = Date.now() - rightTouchStartTime;
+            if (!rightTouchMoved && touchDuration < 250) {
+                raycastAction('place');
+            }
         }
     }
 };
 
 window.addEventListener('touchend', handleTouchEnd);
 window.addEventListener('touchcancel', handleTouchEnd);
-
-// Keep existing UI buttons working
-document.querySelectorAll('.btn-mine').forEach(btn => btn.addEventListener('touchstart', (e) => { e.preventDefault(); raycastAction('mine'); }));
-document.querySelectorAll('.btn-place').forEach(btn => btn.addEventListener('touchstart', (e) => { e.preventDefault(); raycastAction('place'); }));
-
-const jumpBtn = document.getElementById('btn-jump');
-if (jumpBtn) {
-    jumpBtn.addEventListener('touchstart', (e) => {
-        e.preventDefault();
-        if (playerOnGround && !isFreeCam) {
-            playerVelocity.y = 0.45; 
-            playerOnGround = false;
-        }
-    });
-}
-document.querySelectorAll('.block-option').forEach(opt => {
-    opt.addEventListener('touchstart', (e) => {
-        e.preventDefault();
-        document.querySelectorAll('.block-option').forEach(o => o.classList.remove('active'));
-        opt.classList.add('active');
-        selectedBlockID = parseInt(opt.dataset.id);
-    });
-});
-
-
-// ==========================================
-// RAYCASTING 
-// ==========================================
-const raycaster = new THREE.Raycaster();
-function raycastAction(action) {
-    raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
-    const hits = raycaster.intersectObjects(Array.from(chunks.values()).map(c => c.mesh).filter(Boolean));
-
-    if (hits.length > 0 && hits[0].distance < 18) {
-        const hit = hits[0];
-        const point = hit.point;
-        const normal = hit.face.normal;
-        if (action === 'mine') {
-            const targetX = Math.floor(point.x - normal.x * 0.1);
-            const targetY = Math.floor(point.y - normal.y * 0.1);
-            const targetZ = Math.floor(point.z - normal.z * 0.1);
-            setBlock(targetX, targetY, targetZ, 0);
-        } else if (action === 'place') {
-            const targetX = Math.floor(point.x + normal.x * 0.1);
-            const targetY = Math.floor(point.y + normal.y * 0.1);
-            const targetZ = Math.floor(point.z + normal.z * 0.1);
-            setBlock(targetX, targetY, targetZ, selectedBlockID);
-        }
-    }
-}
-
 
 // ==========================================
 // SCALED PLAYER PHYSICS & MULTI-POINT COLLISION
