@@ -226,70 +226,125 @@ function buildChunkMesh(cx, cz) {
 }
 
 // ==========================================
-// DUAL JOYSTICK & TOUCH CONTROLS
+// DEV TOOLS UI (Dynamically Created)
+// ==========================================
+let isFreeCam = false;
+
+const devBtn = document.createElement('button');
+devBtn.innerText = '⚙ Dev Tools';
+devBtn.className = 'dev-ui';
+devBtn.style.cssText = 'position:fixed; top:10px; right:10px; z-index:100; padding:10px 15px; background:rgba(0,0,0,0.6); color:white; border:2px solid #555; border-radius:8px; font-weight:bold; font-family:sans-serif;';
+document.body.appendChild(devBtn);
+
+const devMenu = document.createElement('div');
+devMenu.className = 'dev-ui';
+devMenu.style.cssText = 'display:none; position:fixed; top:60px; right:10px; z-index:100; background:rgba(0,0,0,0.8); padding:15px; border-radius:8px; border:1px solid #555; flex-direction:column; gap:10px;';
+document.body.appendChild(devMenu);
+
+devBtn.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    devMenu.style.display = devMenu.style.display === 'none' ? 'flex' : 'none';
+});
+
+const freeCamBtn = document.createElement('button');
+freeCamBtn.innerText = 'Free Cam: OFF';
+freeCamBtn.className = 'dev-ui';
+freeCamBtn.style.cssText = 'padding:10px; background:#444; color:white; border:none; border-radius:5px; font-weight:bold;';
+freeCamBtn.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    isFreeCam = !isFreeCam;
+    freeCamBtn.innerText = `Free Cam: ${isFreeCam ? 'ON' : 'OFF'}`;
+    freeCamBtn.style.background = isFreeCam ? '#4CAF50' : '#444';
+    if (isFreeCam) playerVelocity.y = 0; // Freeze falling immediately
+});
+devMenu.appendChild(freeCamBtn);
+
+
+// ==========================================
+// SPLIT-SCREEN TOUCH CONTROLS
 // ==========================================
 const moveVector = { x: 0, y: 0 };
-const lookVector = { x: 0, y: 0 };
+let leftTouchId = null;
+let rightTouchId = null;
+let leftTouchStart = { x: 0, y: 0 };
+let rightTouchPrev = { x: 0, y: 0 };
 
-function setupJoystick(baseId, knobId, outputVector) {
-    const base = document.getElementById(baseId);
-    const knob = document.getElementById(knobId);
-    if (!base || !knob) return; 
-    let touchId = null;
+window.addEventListener('touchstart', (e) => {
+    // Ignore touches on UI buttons so they don't spin the camera
+    if (e.target.closest('button') || e.target.closest('.block-option') || e.target.closest('.dev-ui')) return;
 
-    base.addEventListener('touchstart', (e) => {
-        e.preventDefault();
-        if (touchId !== null) return;
-        const touch = e.changedTouches[0];
-        touchId = touch.identifier;
-        updateKnob(touch);
-    });
-
-    window.addEventListener('touchmove', (e) => {
-        if (touchId === null) return;
-        for (let touch of e.changedTouches) {
-            if (touch.identifier === touchId) {
-                updateKnob(touch);
-                break;
+    for (let i = 0; i < e.changedTouches.length; i++) {
+        let touch = e.changedTouches[i];
+        if (touch.clientX < window.innerWidth / 2) {
+            // Left half: Floating Joystick start
+            if (leftTouchId === null) {
+                leftTouchId = touch.identifier;
+                leftTouchStart.x = touch.clientX;
+                leftTouchStart.y = touch.clientY;
+            }
+        } else {
+            // Right half: Drag-to-look start
+            if (rightTouchId === null) {
+                rightTouchId = touch.identifier;
+                rightTouchPrev.x = touch.clientX;
+                rightTouchPrev.y = touch.clientY;
             }
         }
-    });
-
-    const resetKnob = (e) => {
-        if (touchId === null) return;
-        for (let touch of e.changedTouches) {
-            if (touch.identifier === touchId) {
-                touchId = null;
-                knob.style.transform = `translate(0px, 0px)`;
-                outputVector.x = 0;
-                outputVector.y = 0;
-                break;
-            }
-        }
-    };
-    window.addEventListener('touchend', resetKnob);
-    window.addEventListener('touchcancel', resetKnob);
-
-    function updateKnob(touch) {
-        const rect = base.getBoundingClientRect();
-        const centerX = rect.left + rect.width / 2;
-        const centerY = rect.top + rect.height / 2;
-        let dx = touch.clientX - centerX;
-        let dy = touch.clientY - centerY;
-        const maxRadius = rect.width / 2;
-        const distance = Math.hypot(dx, dy);
-        if (distance > maxRadius) {
-            dx = (dx / distance) * maxRadius;
-            dy = (dy / distance) * maxRadius;
-        }
-        knob.style.transform = `translate(${dx}px, ${dy}px)`;
-        outputVector.x = dx / maxRadius;
-        outputVector.y = dy / maxRadius;
     }
-}
-setupJoystick('joy-left', 'knob-left', moveVector);
-setupJoystick('joy-right', 'knob-right', lookVector);
+}, { passive: false });
 
+window.addEventListener('touchmove', (e) => {
+    for (let i = 0; i < e.changedTouches.length; i++) {
+        let touch = e.changedTouches[i];
+        
+        if (touch.identifier === leftTouchId) {
+            // Calculate movement vector (capped at 50px drag radius)
+            let dx = touch.clientX - leftTouchStart.x;
+            let dy = touch.clientY - leftTouchStart.y;
+            const maxRadius = 50;
+            const dist = Math.hypot(dx, dy);
+            
+            if (dist > maxRadius) {
+                dx = (dx / dist) * maxRadius;
+                dy = (dy / dist) * maxRadius;
+            }
+            moveVector.x = dx / maxRadius;
+            moveVector.y = dy / maxRadius;
+            
+        } else if (touch.identifier === rightTouchId) {
+            // Calculate look deltas
+            let dx = touch.clientX - rightTouchPrev.x;
+            let dy = touch.clientY - rightTouchPrev.y;
+            
+            yaw -= dx * 0.005;   // Look sensitivity
+            pitch -= dy * 0.005; // Look sensitivity
+            
+            // Clamp looking straight up or down
+            pitch = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, pitch));
+            
+            rightTouchPrev.x = touch.clientX;
+            rightTouchPrev.y = touch.clientY;
+        }
+    }
+}, { passive: false });
+
+const handleTouchEnd = (e) => {
+    for (let i = 0; i < e.changedTouches.length; i++) {
+        let touch = e.changedTouches[i];
+        if (touch.identifier === leftTouchId) {
+            leftTouchId = null;
+            moveVector.x = 0;
+            moveVector.y = 0;
+        } else if (touch.identifier === rightTouchId) {
+            rightTouchId = null;
+        }
+    }
+};
+
+window.addEventListener('touchend', handleTouchEnd);
+window.addEventListener('touchcancel', handleTouchEnd);
+
+// Keep existing UI buttons working
 document.querySelectorAll('.btn-mine').forEach(btn => btn.addEventListener('touchstart', (e) => { e.preventDefault(); raycastAction('mine'); }));
 document.querySelectorAll('.btn-place').forEach(btn => btn.addEventListener('touchstart', (e) => { e.preventDefault(); raycastAction('place'); }));
 
@@ -297,8 +352,8 @@ const jumpBtn = document.getElementById('btn-jump');
 if (jumpBtn) {
     jumpBtn.addEventListener('touchstart', (e) => {
         e.preventDefault();
-        if (playerOnGround) {
-            playerVelocity.y = 0.45; // Jump strength for 1ft scale
+        if (playerOnGround && !isFreeCam) {
+            playerVelocity.y = 0.45; 
             playerOnGround = false;
         }
     });
@@ -312,8 +367,9 @@ document.querySelectorAll('.block-option').forEach(opt => {
     });
 });
 
+
 // ==========================================
-// RAYCASTING (SCALED FOR 1FT REACH)
+// RAYCASTING 
 // ==========================================
 const raycaster = new THREE.Raycaster();
 function raycastAction(action) {
@@ -338,6 +394,7 @@ function raycastAction(action) {
     }
 }
 
+
 // ==========================================
 // SCALED PLAYER PHYSICS & MULTI-POINT COLLISION
 // ==========================================
@@ -351,36 +408,54 @@ function isSolidBlock(x, y, z) {
 }
 
 function updatePlayer() {
-    if (!window.playerSpawned) return; // Keep player frozen until terrain arrives
+    if (!window.playerSpawned) return; 
 
-    yaw -= lookVector.x * 0.04;
-    pitch -= lookVector.y * 0.04;
-    pitch = Math.max(-Math.PI / 2 + 0.1, Math.min(Math.PI / 2 - 0.1, pitch));
+    // Apply rotation from touch inputs
     camera.rotation.order = "YXZ";
     camera.rotation.y = yaw;
     camera.rotation.x = pitch;
 
-    const forward = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw)).normalize();
-    const side = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw)).normalize();
+    const speed = isFreeCam ? 0.60 : 0.20; 
 
-    const speed = 0.20; 
+    // ------------------------------------------
+    // FREE CAM LOGIC (No clip, full flight)
+    // ------------------------------------------
+    if (isFreeCam) {
+        // Get true forward vector based on where camera is physically looking (includes pitch)
+        const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
+        const side = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion).normalize();
+        
+        const moveDir = new THREE.Vector3();
+        // -moveVector.y translates dragging UP to moving FORWARD
+        moveDir.addScaledVector(forward, -moveVector.y * speed);
+        moveDir.addScaledVector(side, moveVector.x * speed);
+
+        camera.position.add(moveDir);
+        return; // Exit function completely to skip gravity and collisions
+    }
+
+    // ------------------------------------------
+    // STANDARD WALKING LOGIC
+    // ------------------------------------------
+    // Ignore pitch for walking (only horizontal direction matters)
+    const walkForward = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw)).normalize();
+    const walkSide = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw)).normalize();
+
     const moveDir = new THREE.Vector3();
-    moveDir.addScaledVector(forward, -moveVector.y * speed);
-    moveDir.addScaledVector(side, moveVector.x * speed);
+    moveDir.addScaledVector(walkForward, -moveVector.y * speed);
+    moveDir.addScaledVector(walkSide, moveVector.x * speed);
 
     // Gravity
     playerVelocity.y = Math.max(-0.5, playerVelocity.y - 0.025);
 
-    // --- HORIZONTAL MOVEMENT WITH AUTO-STEP ---
     const nextX = camera.position.x + moveDir.x;
     const nextZ = camera.position.z + moveDir.z;
-    const radius = 0.35; // Player bounding radius
+    const radius = 0.35; 
 
     let eyeY = camera.position.y;
     let feetY = eyeY - 5.4;
-    const STEP_HEIGHT = 1.05; // Can step up 1 block high
+    const STEP_HEIGHT = 1.05; 
 
-    // Helper to check horizontal collision at a given Y baseline
     const checkCollisionAtY = (testY) => {
         let collideX = false, collideZ = false;
         for (let checkY = testY; checkY <= testY + 5.0; checkY += 1.5) {
@@ -392,7 +467,6 @@ function updatePlayer() {
 
     let { collideX, collideZ } = checkCollisionAtY(feetY);
 
-    // AUTO-STEP LOGIC
     if ((collideX || collideZ) && playerOnGround) {
         const stepY = feetY + STEP_HEIGHT;
         const stepResult = checkCollisionAtY(stepY);
@@ -408,11 +482,9 @@ function updatePlayer() {
     if (!collideX) camera.position.x = nextX;
     if (!collideZ) camera.position.z = nextZ;
 
-    // --- VERTICAL MOVEMENT (Y) ---
     camera.position.y += playerVelocity.y;
     const newFeetY = camera.position.y - 5.5;
 
-    // Check corners under feet
     const feetCorners = [
         [camera.position.x - radius, camera.position.z - radius],
         [camera.position.x + radius, camera.position.z - radius],
@@ -446,7 +518,6 @@ function animate() {
     requestAnimationFrame(animate);
     updatePlayer();
     
-    // Auto-load chunks as player explores
     if (window.playerSpawned) {
         updateWorld();
     }
