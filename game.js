@@ -4,16 +4,18 @@
 const CHUNK_SIZE = 16;
 const MAX_HEIGHT = 768;
 const RENDER_DISTANCE = 2;
+
 const BLOCK_TYPES = {
-    0: { name: 'Air', transparent: true },
-    1: { name: 'Grass', color: 0x4CAF50 },
-    2: { name: 'Dirt', color: 0x795548 },
-    3: { name: 'Wood', color: 0x8D6E63 },
-    4: { name: 'Sand', color: 0xFBC02D },
-    5: { name: 'Stone', color: 0x757575 },
-    6: { name: 'Leaves', color: 0x2E7D32, transparent: true },
-    7: { name: 'Water', color: 0x2196F3, transparent: true }
+    0: { name: 'Air', transparent: true, solid: false },
+    1: { name: 'Grass', color: 0x4CAF50, transparent: false, solid: true },
+    2: { name: 'Dirt', color: 0x795548, transparent: false, solid: true },
+    3: { name: 'Wood', color: 0x8D6E63, transparent: false, solid: true },
+    4: { name: 'Sand', color: 0xFBC02D, transparent: false, solid: true },
+    5: { name: 'Stone', color: 0x757575, transparent: false, solid: true },
+    6: { name: 'Leaves', color: 0x2E7D32, transparent: true, solid: true },   // Transparent BUT Solid
+    7: { name: 'Water', color: 0x2196F3, transparent: true, solid: false, opacity: 0.6 } // Transparent & Non-solid
 };
+
 let selectedBlockID = 3;
 
 // ==========================================
