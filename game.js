@@ -431,7 +431,8 @@ let playerOnGround = false;
 
 function isSolidBlock(x, y, z) {
     const blockID = getBlock(Math.floor(x), Math.floor(y), Math.floor(z));
-    return blockID !== 0 && BLOCK_TYPES[blockID] && !BLOCK_TYPES[blockID].transparent;
+    // Water (7) and Air (0) are non-solid
+    return blockID !== 0 && blockID !== 7 && BLOCK_TYPES[blockID] && !BLOCK_TYPES[blockID].transparent;
 }
 
 function updatePlayer() {
