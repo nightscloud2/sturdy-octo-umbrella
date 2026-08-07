@@ -3,7 +3,7 @@
 // ==========================================
 const CHUNK_SIZE = 16;
 const MAX_HEIGHT = 768;
-const RENDER_DISTANCE = 2;
+const RENDER_DISTANCE = 2; 
 
 const BLOCK_TYPES = {
     0: { name: 'Air', transparent: true, solid: false },
@@ -12,9 +12,32 @@ const BLOCK_TYPES = {
     3: { name: 'Wood', color: 0x8D6E63, transparent: false, solid: true },
     4: { name: 'Sand', color: 0xFBC02D, transparent: false, solid: true },
     5: { name: 'Stone', color: 0x757575, transparent: false, solid: true },
-    6: { name: 'Leaves', color: 0x2E7D32, transparent: true, solid: true },   // Transparent BUT Solid
-    7: { name: 'Water', color: 0x2196F3, transparent: true, solid: false, opacity: 0.6 } // Transparent & Non-solid
+    6: { name: 'Leaves', color: 0x2E7D32, transparent: true, solid: true }
 };
+
+// --- FLUID HELPERS ---
+function isWater(id) { return id >= 10 && id <= 17; }
+function isLava(id) { return id >= 20 && id <= 27; }
+function isFluid(id) { return isWater(id) || isLava(id); }
+
+function getFluidLevel(id) {
+    if (isWater(id)) return id - 9;   // 10 -> 1, 17 -> 8
+    if (isLava(id)) return id - 19;  // 20 -> 1, 27 -> 8
+    return 0;
+}
+
+function getFluidType(id) {
+    if (isWater(id)) return 'water';
+    if (isLava(id)) return 'lava';
+    return null;
+}
+
+function makeFluidID(type, level) {
+    const clamped = Math.max(1, Math.min(8, level));
+    if (type === 'water') return 9 + clamped;
+    if (type === 'lava') return 19 + clamped;
+    return 0;
+}
 
 let selectedBlockID = 3;
 
@@ -466,6 +489,10 @@ let playerOnGround = false;
 
 function isSolidBlock(x, y, z) {
     const blockID = getBlock(Math.floor(x), Math.floor(y), Math.floor(z));
+    
+    // Air (0) and any fluid (10-27) are non-solid
+    if (blockID === 0 || isFluid(blockID)) return false;
+    
     const block = BLOCK_TYPES[blockID];
     return block ? block.solid : false;
 }
