@@ -265,7 +265,11 @@ function buildChunkMesh(cx, cz) {
     geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
     geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
     geometry.setIndex(indices);
-    const material = new THREE.MeshLambertMaterial({ vertexColors: true });
+    const material = new THREE.MeshLambertMaterial({ 
+    vertexColors: true, 
+    transparent: true, 
+    opacity: 0.8 
+});
     chunk.mesh = new THREE.Mesh(geometry, material);
     scene.add(chunk.mesh);
 }
