@@ -103,10 +103,8 @@ worldWorker.onmessage = function (e) {
 
 function spawnPlayerSafely() {
     let spawnY = MAX_HEIGHT - 1;
-    // Skip air (0) AND water (7) when looking for spawn surface
     while (spawnY > 0) {
-        let block = getBlock(8, spawnY, 8);
-        if (block !== 0 && block !== 7) break;
+        if (isSolidBlock(8, spawnY, 8)) break;
         spawnY--;
     }
     camera.position.set(8.5, spawnY + 1 + 5.0, 8.5);
