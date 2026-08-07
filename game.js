@@ -34,13 +34,13 @@ dirLight.position.set(50, 100, 50);
 scene.add(dirLight);
 
 function spawnPlayerSafely() {
-    // Find highest solid block at spawn point (8, 8)
-    let spawnY = CHUNK_HEIGHT - 1;
-    while (spawnY > 0 && getBlock(8, spawnY, 8) === 0) {
-        spawnY--;
+    // Start high and find top solid block at (8, 8)
+    for (let y = 350; y > 0; y--) {
+        if (getBlock(8, y, 8) !== 0) {
+            camera.position.set(8, y + 6.0, 8); // Spawn 6 blocks above top block
+            break;
+        }
     }
-    // Place player feet above top block (eye height +5.5)
-    camera.position.set(8.5, spawnY + 1 + 5.5, 8.5);
 }
 
 // ==========================================
