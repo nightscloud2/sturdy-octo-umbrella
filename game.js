@@ -57,17 +57,22 @@ const worldWorker = new Worker('./worldWorker.js');
 window.playerSpawned = false; // Prevents moving until world loads
 
 worldWorker.onmessage = function (e) {
-    const { cx, cz, data } = e.data;
+    const { cx, cz, allocatedHeight, data } = e.data;
     const key = getChunkKey(cx, cz);
     
-    // Convert ArrayBuffer back to Uint8Array chunk
+    // Save the dynamic height along with the block data
     const chunkData = new Uint8Array(data);
-    chunks.set(key, { data: chunkData, mesh: null });
+    chunks.set(key, { 
+        data: chunkData, 
+        allocatedHeight: allocatedHeight, 
+        mesh: null, 
+        dirty: true 
+    });
     
     // Build visual 3D mesh on main thread
     buildChunkMesh(cx, cz);
-
-    // Wait for the center chunk (0,0) to finish before spawning
+    
+    // Wait for the center chunk (0,0) to finish loading
     if (cx === 0 && cz === 0 && !window.playerSpawned) {
         spawnPlayerSafely();
         window.playerSpawned = true;
