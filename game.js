@@ -167,14 +167,19 @@ function updateWorld() {
 // ==========================================
 // GREEDY MESH GENERATOR
 // ==========================================
+
 function buildChunkMesh(cx, cz) {
     const key = getChunkKey(cx, cz);
     const chunk = chunks.get(key);
     if (!chunk || !chunk.data) return;
-    if (chunk.mesh) { scene.remove(chunk.mesh); chunk.mesh.geometry.dispose(); }
-    
-    const positions = [], normals = [], colors = [], indices = [];
-    let vertexCount = 0;
+
+    // Clean up old meshes
+    if (chunk.opaqueMesh) { scene.remove(chunk.opaqueMesh); chunk.opaqueMesh.geometry.dispose(); chunk.opaqueMesh = null; }
+    if (chunk.transparentMesh) { scene.remove(chunk.transparentMesh); chunk.transparentMesh.geometry.dispose(); chunk.transparentMesh = null; }
+
+    const opaque = { pos: [], norm: [], col: [], idx: [], count: 0 };
+    const trans = { pos: [], norm: [], col: [], idx: [], count: 0 };
+
     const faces = [
         { dir: [1, 0, 0], mergeAxis: 'z', corners: [[1,0,0],[1,1,0],[1,1,1],[1,0,1]] },
         { dir: [-1, 0, 0], mergeAxis: 'z', corners: [[0,0,1],[0,1,1],[0,1,0],[0,0,0]] },
@@ -188,22 +193,25 @@ function buildChunkMesh(cx, cz) {
 
     for (const face of faces) {
         const emitQuad = (run) => {
+            const blockDef = BLOCK_TYPES[run.blockID] || { color: 0xFFFFFF, transparent: false };
+            const target = blockDef.transparent ? trans : opaque;
+
             const wx = cx * CHUNK_SIZE + run.x;
             const wz = cz * CHUNK_SIZE + run.z;
-            const blockDef = BLOCK_TYPES[run.blockID] || { color: 0xFFFFFF };
             const hex = blockDef.color || 0xFFFFFF;
             const shade = face.dir[1] === 1 ? 1.0 : (face.dir[1] === -1 ? 0.5 : 0.8);
             const c = new THREE.Color(hex).multiplyScalar(shade);
+
             for (const corner of face.corners) {
                 let px = wx + (corner[0] === 1 && face.mergeAxis === 'x' ? run.length : corner[0]);
                 let py = run.y + corner[1];
                 let pz = wz + (corner[2] === 1 && face.mergeAxis === 'z' ? run.length : corner[2]);
-                positions.push(px, py, pz);
-                normals.push(...face.dir);
-                colors.push(c.r, c.g, c.b);
+                target.pos.push(px, py, pz);
+                target.norm.push(...face.dir);
+                target.col.push(c.r, c.g, c.b);
             }
-            indices.push(vertexCount, vertexCount + 1, vertexCount + 2, vertexCount, vertexCount + 2, vertexCount + 3);
-            vertexCount += 4;
+            target.idx.push(target.count, target.count + 1, target.count + 2, target.count, target.count + 2, target.count + 3);
+            target.count += 4;
         };
 
         if (face.mergeAxis === 'x') {
@@ -259,20 +267,36 @@ function buildChunkMesh(cx, cz) {
         }
     }
 
-    if (positions.length === 0) return;
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
-    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-    geometry.setIndex(indices);
-    const material = new THREE.MeshLambertMaterial({ 
-    vertexColors: true, 
-    transparent: true, 
-    opacity: 0.8 
-});
-    chunk.mesh = new THREE.Mesh(geometry, material);
-    scene.add(chunk.mesh);
+    // Build Opaque Mesh
+    if (opaque.pos.length > 0) {
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.Float32BufferAttribute(opaque.pos, 3));
+        geometry.setAttribute('normal', new THREE.Float32BufferAttribute(opaque.norm, 3));
+        geometry.setAttribute('color', new THREE.Float32BufferAttribute(opaque.col, 3));
+        geometry.setIndex(opaque.idx);
+        const material = new THREE.MeshLambertMaterial({ vertexColors: true });
+        chunk.opaqueMesh = new THREE.Mesh(geometry, material);
+        scene.add(chunk.opaqueMesh);
+    }
+
+    // Build Transparent Mesh
+    if (trans.pos.length > 0) {
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.Float32BufferAttribute(trans.pos, 3));
+        geometry.setAttribute('normal', new THREE.Float32BufferAttribute(trans.norm, 3));
+        geometry.setAttribute('color', new THREE.Float32BufferAttribute(trans.col, 3));
+        geometry.setIndex(trans.idx);
+        const material = new THREE.MeshLambertMaterial({ 
+            vertexColors: true, 
+            transparent: true, 
+            opacity: 0.75 
+        });
+        chunk.transparentMesh = new THREE.Mesh(geometry, material);
+        scene.add(chunk.transparentMesh);
+    }
 }
+
+
 
 // ==========================================
 // CONTINUOUS MINING & PLACING ENGINE
