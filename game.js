@@ -306,7 +306,14 @@ let mineInterval = null;
 
 function raycastAction(action) {
     raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
-    const hits = raycaster.intersectObjects(Array.from(chunks.values()).map(c => c.mesh).filter(Boolean));
+
+    const activeMeshes = [];
+    chunks.forEach(chunk => {
+        if (chunk.opaqueMesh) activeMeshes.push(chunk.opaqueMesh);
+        if (chunk.transparentMesh) activeMeshes.push(chunk.transparentMesh);
+    });
+
+    const hits = raycaster.intersectObjects(activeMeshes);
 
     if (hits.length > 0 && hits[0].distance < 18) {
         const hit = hits[0];
