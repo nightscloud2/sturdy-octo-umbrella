@@ -649,12 +649,162 @@ function updatePlayer() {
 }
 
 // ==========================================
+// FLUID SIMULATION ENGINE (Active Queue Automata)
+// ==========================================
+const activeFluidSet = new Set();
+let fluidTickCounter = 0;
+
+// Helper to convert (x, y, z) into a Set key
+function fluidKey(x, y, z) {
+    return `${x},${y},${z}`;
+}
+
+// Helper to parse key back into coordinates
+function parseFluidKey(key) {
+    const parts = key.split(',').map(Number);
+    return { x: parts[0], y: parts[1], z: parts[2] };
+}
+
+// Wake up a coordinate AND its 6 surrounding neighbors when a change happens
+function queueFluidCheck(x, y, z) {
+    activeFluidSet.add(fluidKey(x, y, z));
+    activeFluidSet.add(fluidKey(x + 1, y, z));
+    activeFluidSet.add(fluidKey(x - 1, y, z));
+    activeFluidSet.add(fluidKey(x, y + 1, z));
+    activeFluidSet.add(fluidKey(x, y - 1, z));
+    activeFluidSet.add(fluidKey(x, y, z + 1));
+    activeFluidSet.add(fluidKey(x, y, z - 1));
+}
+
+// Overwrite/Wrap standard setBlock to automatically wake up adjacent liquids
+function setBlockAndQueue(x, y, z, blockID) {
+    setBlock(x, y, z, blockID);
+    queueFluidCheck(x, y, z);
+}
+
+function processFluidTick() {
+    if (activeFluidSet.size === 0) return;
+
+    // Drain current active queue into a array for processing this frame
+    const queue = Array.from(activeFluidSet);
+    activeFluidSet.clear();
+
+    for (const key of queue) {
+        const { x, y, z } = parseFluidKey(key);
+        const currentID = getBlock(x, y, z);
+
+        if (!isFluid(currentID)) continue;
+
+        const type = getFluidType(currentID);
+        let level = getFluidLevel(currentID);
+
+        // Viscosity check: Lava updates every 12 ticks, Water updates every 3 ticks
+        const delay = (type === 'lava') ? 12 : 3;
+        if (fluidTickCounter % delay !== 0) {
+            activeFluidSet.add(key); // Re-queue for next valid tick frame
+            continue;
+        }
+
+        // ------------------------------------------
+        // STEP 1: DOWNWARD GRAVITY FLOW
+        // ------------------------------------------
+        const belowID = getBlock(x, y - 1, z);
+        const belowIsAir = (belowID === 0);
+        const belowIsSameFluid = (isFluid(belowID) && getFluidType(belowID) === type);
+        const belowLevel = belowIsSameFluid ? getFluidLevel(belowID) : 0;
+
+        if (belowIsAir || (belowIsSameFluid && belowLevel < 8)) {
+            const spaceAvailable = 8 - belowLevel;
+            const flowAmount = Math.min(level, spaceAvailable);
+
+            const newBelowLevel = belowLevel + flowAmount;
+            const newCurrentLevel = level - flowAmount;
+
+            setBlock(x, y - 1, z, makeFluidID(type, newBelowLevel));
+            queueFluidCheck(x, y - 1, z);
+
+            if (newCurrentLevel > 0) {
+                setBlock(x, y, z, makeFluidID(type, newCurrentLevel));
+                queueFluidCheck(x, y, z);
+            } else {
+                setBlock(x, y, z, 0); // Completely drained top voxel
+                queueFluidCheck(x, y, z);
+            }
+            continue; // Gravity takes priority; skip horizontal spreading this tick
+        }
+
+        // ------------------------------------------
+        // STEP 2: HORIZONTAL EQUALIZATION
+        // ------------------------------------------
+        const neighbors = [
+            { x: x + 1, y, z },
+            { x: x - 1, y, z },
+            { x, y, z: z + 1 },
+            { x, y, z: z - 1 }
+        ];
+
+        let validTargets = [];
+        for (const n of neighbors) {
+            const nID = getBlock(n.x, n.y, n.z);
+            if (nID === 0) {
+                validTargets.push({ ...n, level: 0 });
+            } else if (isFluid(nID) && getFluidType(nID) === type) {
+                const nLevel = getFluidLevel(nID);
+                if (nLevel < level) {
+                    validTargets.push({ ...n, level: nLevel });
+                }
+            }
+        }
+
+        // Surface Tension: Lava needs at least level > 3 to spread horizontally
+        const minSpreadLevel = (type === 'lava') ? 3 : 1;
+
+        if (validTargets.length > 0 && level > minSpreadLevel) {
+            // Find lowest neighbor level to equalize into
+            validTargets.sort((a, b) => a.level - b.level);
+            const target = validTargets[0];
+
+            // Share volume evenly
+            const diff = level - target.level;
+            if (diff >= 2) {
+                const transferAmount = Math.floor(diff / 2);
+                
+                setBlock(x, y, z, makeFluidID(type, level - transferAmount));
+                setBlock(target.x, target.y, target.z, makeFluidID(type, target.level + transferAmount));
+
+                queueFluidCheck(x, y, z);
+                queueFluidCheck(target.x, target.y, target.z);
+                continue;
+            }
+        }
+
+        // ------------------------------------------
+        // STEP 3: UNIVERSAL EVAPORATION
+        // ------------------------------------------
+        // Thin liquid puddles (Level 1) sitting on ANY solid block evaporated over time
+        if (level === 1 && isSolidBlock(x, y - 1, z)) {
+            if (Math.random() < 0.15) { // 15% chance per update cycle
+                setBlock(x, y, z, 0); // Evaporate to Air
+                queueFluidCheck(x, y, z);
+            }
+        }
+    }
+}
+
+// Call this inside your main animation loop (animate / render function)
+function updateFluidSimulation() {
+    fluidTickCounter++;
+    processFluidTick();
+}
+
+// ==========================================
 // MAIN LOOP & RESIZE
 // ==========================================
 updateWorld();
 
 function animate() {
     requestAnimationFrame(animate);
+    updateFluidSimulation();
     updatePlayer();
     if (window.playerSpawned) {
         updateWorld();
