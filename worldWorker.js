@@ -98,8 +98,9 @@ function generateChunkData(cx, cz) {
                         block = 0; 
                     }
                 } else if (y <= SEA_LEVEL) {
-                    block = 7; // Water
+                    block = 17; // Full Water Block (Level 8)
                 }
+                
                 
                 if (block !== 0) {
                     data[getIndex(x, y, z)] = block;
