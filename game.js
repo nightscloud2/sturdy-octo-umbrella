@@ -804,7 +804,6 @@ updateWorld();
 
 function animate() {
     requestAnimationFrame(animate);
-    updateFluidSimulation();
     updatePlayer();
     if (window.playerSpawned) {
         updateWorld();
