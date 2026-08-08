@@ -369,12 +369,10 @@ function buildChunkMesh(cx, cz) {
 // ==========================================
 // CONTINUOUS MINING & PLACING ENGINE
 // ==========================================
-const raycaster = new THREE.Raycaster();
-let mineInterval = null;
-
 function raycastAction(action) {
     raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
 
+    // Collect all active chunk meshes (both solid and transparent)
     const activeMeshes = [];
     chunks.forEach(chunk => {
         if (chunk.opaqueMesh) activeMeshes.push(chunk.opaqueMesh);
@@ -387,6 +385,7 @@ function raycastAction(action) {
         const hit = hits[0];
         const point = hit.point;
         const normal = hit.face.normal;
+        
         if (action === 'mine') {
             const targetX = Math.floor(point.x - normal.x * 0.1);
             const targetY = Math.floor(point.y - normal.y * 0.1);
@@ -398,21 +397,6 @@ function raycastAction(action) {
             const targetZ = Math.floor(point.z + normal.z * 0.1);
             setBlock(targetX, targetY, targetZ, selectedBlockID);
         }
-    }
-}
-
-function startContinuousMining() {
-    if (mineInterval) return;
-    raycastAction('mine');
-    mineInterval = setInterval(() => {
-        raycastAction('mine');
-    }, 200);
-}
-
-function stopContinuousMining() {
-    if (mineInterval) {
-        clearInterval(mineInterval);
-        mineInterval = null;
     }
 }
 
