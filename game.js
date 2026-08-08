@@ -369,6 +369,9 @@ function buildChunkMesh(cx, cz) {
 // ==========================================
 // CONTINUOUS MINING & PLACING ENGINE
 // ==========================================
+const raycaster = new THREE.Raycaster();
+let mineInterval = null;
+
 function raycastAction(action) {
     raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
 
@@ -399,6 +402,34 @@ function raycastAction(action) {
         }
     }
 }
+
+function startAction(action) {
+    if (mineInterval) clearInterval(mineInterval);
+    raycastAction(action);
+    mineInterval = setInterval(() => {
+        raycastAction(action);
+    }, 200);
+}
+
+function stopAction() {
+    if (mineInterval) {
+        clearInterval(mineInterval);
+        mineInterval = null;
+    }
+}
+
+window.addEventListener('mousedown', (e) => {
+    if (!document.pointerLockElement) return;
+    if (e.button === 0) startAction('mine');
+    if (e.button === 2) startAction('place');
+});
+
+window.addEventListener('mouseup', (e) => {
+    if (e.button === 0 || e.button === 2) stopAction();
+});
+
+window.addEventListener('contextmenu', e => e.preventDefault());
+
 
 // ==========================================
 // SPLIT-SCREEN TOUCH CONTROLS
