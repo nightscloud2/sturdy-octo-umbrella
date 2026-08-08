@@ -188,15 +188,35 @@ function updateWorld() {
 }
 
 // ==========================================
-// GREEDY MESH GENERATOR
+// 1D GREEDY MESHER (Opaque + Fluid/Transparent)
 // ==========================================
+function isFaceExposed(blockID, neighborID) {
+    if (neighborID === 0) return true; // Touches air
+
+    const currentIsFluid = isFluid(blockID);
+    const neighborIsFluid = isFluid(neighborID);
+
+    if (currentIsFluid) {
+        if (!neighborIsFluid) {
+            // Fluid face is exposed if touching a transparent solid block (e.g. Leaves)
+            return BLOCK_TYPES[neighborID] ? BLOCK_TYPES[neighborID].transparent : false;
+        }
+        // Fluid touching Fluid: expose face if different fluid type or higher fluid level
+        if (getFluidType(blockID) !== getFluidType(neighborID)) return true;
+        return getFluidLevel(blockID) > getFluidLevel(neighborID);
+    } else {
+        // Solid block face is exposed if touching a fluid or transparent solid block
+        if (neighborIsFluid) return true;
+        return BLOCK_TYPES[neighborID] ? BLOCK_TYPES[neighborID].transparent : false;
+    }
+}
 
 function buildChunkMesh(cx, cz) {
     const key = getChunkKey(cx, cz);
     const chunk = chunks.get(key);
-    if (!chunk || !chunk.data) return;
+    if (!chunk || !chunk.data || chunk.data.every(v => v === 0)) return;
 
-    // Clean up old meshes
+    // Clean up previous frame meshes
     if (chunk.opaqueMesh) { scene.remove(chunk.opaqueMesh); chunk.opaqueMesh.geometry.dispose(); chunk.opaqueMesh = null; }
     if (chunk.transparentMesh) { scene.remove(chunk.transparentMesh); chunk.transparentMesh.geometry.dispose(); chunk.transparentMesh = null; }
 
@@ -212,42 +232,64 @@ function buildChunkMesh(cx, cz) {
         { dir: [0, 0, -1], mergeAxis: 'x', corners: [[0,0,0],[0,1,0],[1,1,0],[1,0,0]] }
     ];
 
-    const heightLimit = chunk.allocatedHeight;
+    const maxH = chunk.allocatedHeight || CHUNK_HEIGHT;
 
     for (const face of faces) {
         const emitQuad = (run) => {
-            const blockDef = BLOCK_TYPES[run.blockID] || { color: 0xFFFFFF, transparent: false };
-            const target = blockDef.transparent ? trans : opaque;
+            const blockID = run.blockID;
+            const fluid = isFluid(blockID);
 
+            let hex = 0xFFFFFF;
+            let isTransparent = false;
+
+            if (fluid) {
+                const type = getFluidType(blockID);
+                hex = (type === 'water') ? 0x2196F3 : 0xFF5722;
+                isTransparent = true;
+            } else if (BLOCK_TYPES[blockID]) {
+                hex = BLOCK_TYPES[blockID].color || 0xFFFFFF;
+                isTransparent = !!BLOCK_TYPES[blockID].transparent;
+            }
+
+            const target = isTransparent ? trans : opaque;
             const wx = cx * CHUNK_SIZE + run.x;
             const wz = cz * CHUNK_SIZE + run.z;
-            const hex = blockDef.color || 0xFFFFFF;
             const shade = face.dir[1] === 1 ? 1.0 : (face.dir[1] === -1 ? 0.5 : 0.8);
             const c = new THREE.Color(hex).multiplyScalar(shade);
 
+            // Scale top quad height dynamically for partial fluid levels (Level 1-8 -> 0.125 to 1.0 ft)
+            const blockHeight = fluid ? (getFluidLevel(blockID) / 8.0) : 1.0;
+
             for (const corner of face.corners) {
                 let px = wx + (corner[0] === 1 && face.mergeAxis === 'x' ? run.length : corner[0]);
-                let py = run.y + corner[1];
+                let py = run.y + (corner[1] === 1 ? blockHeight : 0);
                 let pz = wz + (corner[2] === 1 && face.mergeAxis === 'z' ? run.length : corner[2]);
+
                 target.pos.push(px, py, pz);
                 target.norm.push(...face.dir);
                 target.col.push(c.r, c.g, c.b);
             }
-            target.idx.push(target.count, target.count + 1, target.count + 2, target.count, target.count + 2, target.count + 3);
+
+            target.idx.push(
+                target.count, target.count + 1, target.count + 2,
+                target.count, target.count + 2, target.count + 3
+            );
             target.count += 4;
         };
 
         if (face.mergeAxis === 'x') {
-            for (let y = 0; y < heightLimit; y++) {
+            for (let y = 0; y < maxH; y++) {
                 for (let z = 0; z < CHUNK_SIZE; z++) {
                     let currentRun = null;
                     for (let x = 0; x < CHUNK_SIZE; x++) {
                         let blockID = chunk.data[getIndex(x, y, z)];
                         let exposed = false;
+
                         if (blockID !== 0) {
                             let neighborID = getBlock((cx * CHUNK_SIZE + x) + face.dir[0], y + face.dir[1], (cz * CHUNK_SIZE + z) + face.dir[2]);
-                            if (neighborID === 0 || (BLOCK_TYPES[neighborID] && BLOCK_TYPES[neighborID].transparent)) exposed = true;
+                            exposed = isFaceExposed(blockID, neighborID);
                         }
+
                         if (exposed) {
                             if (currentRun && currentRun.blockID === blockID) {
                                 currentRun.length++;
@@ -263,16 +305,18 @@ function buildChunkMesh(cx, cz) {
                 }
             }
         } else {
-            for (let y = 0; y < heightLimit; y++) {
+            for (let y = 0; y < maxH; y++) {
                 for (let x = 0; x < CHUNK_SIZE; x++) {
                     let currentRun = null;
                     for (let z = 0; z < CHUNK_SIZE; z++) {
                         let blockID = chunk.data[getIndex(x, y, z)];
                         let exposed = false;
+
                         if (blockID !== 0) {
                             let neighborID = getBlock((cx * CHUNK_SIZE + x) + face.dir[0], y + face.dir[1], (cz * CHUNK_SIZE + z) + face.dir[2]);
-                            if (neighborID === 0 || (BLOCK_TYPES[neighborID] && BLOCK_TYPES[neighborID].transparent)) exposed = true;
+                            exposed = isFaceExposed(blockID, neighborID);
                         }
+
                         if (exposed) {
                             if (currentRun && currentRun.blockID === blockID) {
                                 currentRun.length++;
@@ -290,7 +334,7 @@ function buildChunkMesh(cx, cz) {
         }
     }
 
-    // Build Opaque Mesh
+    // Opaque Mesh Pass
     if (opaque.pos.length > 0) {
         const geometry = new THREE.BufferGeometry();
         geometry.setAttribute('position', new THREE.Float32BufferAttribute(opaque.pos, 3));
@@ -302,7 +346,7 @@ function buildChunkMesh(cx, cz) {
         scene.add(chunk.opaqueMesh);
     }
 
-    // Build Transparent Mesh
+    // Transparent Mesh Pass (Water, Lava, Leaves)
     if (trans.pos.length > 0) {
         const geometry = new THREE.BufferGeometry();
         geometry.setAttribute('position', new THREE.Float32BufferAttribute(trans.pos, 3));
@@ -312,7 +356,8 @@ function buildChunkMesh(cx, cz) {
         const material = new THREE.MeshLambertMaterial({ 
             vertexColors: true, 
             transparent: true, 
-            opacity: 0.75 
+            opacity: 0.75,
+            side: THREE.DoubleSide
         });
         chunk.transparentMesh = new THREE.Mesh(geometry, material);
         scene.add(chunk.transparentMesh);
